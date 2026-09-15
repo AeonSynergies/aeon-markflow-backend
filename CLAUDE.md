@@ -33,9 +33,11 @@ Lead           — one per (Contact, Organization): status enum (NEW-COLD, NEW-I
                  (GOOD/LOW/BAD), phone_dnd_status, org_id, recycled_from_deal_id, lost_reason, lost_stage,
                  eligible_for_reengagement_at
 SavedList      — reusable lead segments, decoupled from any one workflow
-Organization   — name, enabled_features[], product_context, brand_voice_guidelines_id, sending_domains[]
-                 (an org can have multiple sending domains — Aeon Miles sometimes sends from the Aeon
-                 Synergies domain — never assume 1:1 org-to-domain)
+Organization   — name, enabled_features[], product_context, brand_voice_guidelines_id,
+                 sending_domains[] { domain, purpose: "marketing" | "transactional" | "alerts" }
+                 (an org can have multiple sending domains, each tagged with its own purpose — Aeon
+                 Miles sometimes sends from the Aeon Synergies domain — never assume 1:1 org-to-domain
+                 or one purpose per org)
 WorkflowTemplate — org-scoped, requires_warmup flag, steps[] (email | call_task | sms | wait)
 Enrollment     — Lead × WorkflowTemplate instance: current step, status (active/paused/completed/exited)
 EmailTemplate  — org-scoped, ab_group_id, current_version_id
@@ -63,9 +65,21 @@ UserAccessGrant — { user_id, app: "markflow"|"onboard", org_id (null = all org
 
 Bounce/reply signals are fully live. Spam-complaint signal is only partial (Yahoo/AOL, once DKIM-enrolled) — don't let later phases assume Google/Microsoft complaint data exists.
 
-## Domain purpose model — refines `Organization.sending_domains[]`
+## Domain purpose model — `Organization.sending_domains[]`
 
-Each org uses subdomains by purpose, not one flat domain per org: `mail.*` for marketing (MarkFlow's workflow engine sends), main domain for transactional (existing nodemailer system, untouched), `alert.`/`notify.*` for system alerts. `sending_domains[]` should be `{ domain, purpose: "marketing" | "transactional" | "alerts" }[]`, not a flat string array — `DomainRouter` needs to pick by purpose, not just by org. **MarkFlow's own internal notifications** (`ReviewTask` alerts, `SendGuardrail` pause notifications) should route through the `alerts` purpose domain, not the `marketing` one — don't mix internal notification sending with cold-outreach sending reputation.
+✅ **Built.** Each org uses subdomains by purpose, not one flat domain per org: `mail.*` for marketing (MarkFlow's workflow engine sends), main domain for transactional (existing nodemailer system, untouched), `alert.`/`notify.*` for an org's own system-to-customer alerts (a possible future MarkFlow feature — not built, and not the same thing as MarkFlow's own internal ops notifications below). `sending_domains[]` is `{ domain, purpose: "marketing" | "transactional" | "alerts" }[]` (`src/constants/organization.ts`'s `SENDING_DOMAIN_PURPOSES`/`SendingDomainEntry`), not a flat string array. `DomainRouter`'s `resolveSendingRoute`/`routableDomainsForOrg` both take a `purpose` argument and only match a domain listed under that exact purpose — a marketing send can never resolve to a transactional/alerts domain even if the org also sends from it for another purpose. `enrollmentProcessor.ts`'s workflow-email sends always resolve with `purpose: 'marketing'`, since that's the only thing they ever are.
+
+**Known real mapping, Aeon Synergies (DKIM confirmed on both):** `aeonsynergies.com` is `transactional`, `mail.aeonsynergies.com` is `marketing`. Record this in whichever org's `sending_domains[]` actually lists them (e.g. Aeon Miles's, if it sends via the Aeon Synergies domain) and in `DOMAIN_PROVIDER_MAP_JSON` (see `.env.example`) — the two configs are separate (org-permission vs. provider-ownership) and both need the real domains listed.
+
+**Not the same system**: MarkFlow's own internal ops notifications (`ReviewTask` alerts, `SendGuardrail` pause notices) do **not** go through this model at all — see the next section. They use a single fixed deployment-level mailbox (`INTERNAL_NOTIFICATIONS_MAILBOX`), never `Organization.sending_domains[]`/`DomainRouter`, because they're MarkFlow's own alerts to its own ops team, not a per-org customer-facing send.
+
+## Internal notifications (ReviewTask alerts, SendGuardrail pause notices) — built
+
+✅ **Done.** `internalNotification.service.ts`'s `sendInternalNotification()` is the one place these go through — called from `sendGuardrail.service.ts`'s `pauseDomain`, `emailTemplateVersion.service.ts`'s `submitForReview`, and `emailOptimization.service.ts`'s `flagVersionDeliverabilityIssue`. It always sends via the `microsoft_graph` provider directly (`getEmailProvider('microsoft_graph')`), from the shared mailbox configured in `INTERNAL_NOTIFICATIONS_MAILBOX` (`notifications@aeonsynergies.com`) — never through `DomainRouter`/`resolveSendingRoute` and never gated by `SendGuardrail`'s `canSend`/`pauseDomain` logic. Deliberately its own code path, not a conditional branch inside the marketing send flow: these are low-volume internal alerts, not cold-outreach sends, and must never compete with or be throttled/paused by logic sized for marketing volume.
+
+Recipients default to the mailbox itself (a shared inbox a team monitors together) — override with `INTERNAL_NOTIFICATIONS_RECIPIENTS` (comma-separated) to route to specific addresses instead. A failed send (missing config, mailbox not yet provisioned, transient Graph error) is logged and swallowed, never thrown — the triggering `ReviewTask`/`DomainGuardrailState` row is the real source of truth and is already persisted by the time the notification fires.
+
+⚠️ **Manual step before relying on this in production**: confirm the `notifications@aeonsynergies.com` shared mailbox actually exists in the Aeon Synergies M365 tenant, and that the existing Graph app registration's Mail.Send permission covers it (if an Exchange Application Access Policy scopes that app to specific mailboxes, add this one). Not something this codebase can verify or provision itself — an ops task. Until confirmed, sends fail silently (logged, not thrown) rather than blocking the ReviewTask/pause they're attached to.
 
 ## Yahoo/AOL CFL — deprioritized, not abandoned
 

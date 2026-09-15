@@ -54,7 +54,9 @@ async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowS
     throw new EnrollmentStepError('email step is missing sending_domain');
   }
 
-  const route = resolveSendingRoute(org, step.sending_domain);
+  // Workflow enrollment sends are always MarkFlow's own cold-outreach/sequence sends — always
+  // resolved against the org's marketing-purpose domains, never transactional/alerts ones.
+  const route = resolveSendingRoute(org, step.sending_domain, 'marketing');
   const orgId = lead.org_id.toString();
 
   const decision = await canSend(route.domain, route.mailbox, orgId, {

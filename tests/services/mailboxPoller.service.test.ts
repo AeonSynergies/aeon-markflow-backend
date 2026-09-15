@@ -146,7 +146,7 @@ describe('mailboxPoller.service', () => {
 
         await pollMailbox('aeonsign.com', 'sales@aeonsign.com', provider);
 
-        expect(Organization.findOne).toHaveBeenCalledWith({ sending_domains: 'aeonsign.com' });
+        expect(Organization.findOne).toHaveBeenCalledWith({ 'sending_domains.domain': 'aeonsign.com' });
         expect(recordDeliverabilityEvent).toHaveBeenCalledWith(
           'aeonsign.com',
           'sales@aeonsign.com',

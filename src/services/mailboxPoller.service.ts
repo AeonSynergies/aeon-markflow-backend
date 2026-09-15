@@ -82,7 +82,7 @@ async function correlateByEmailAddress(email: string | undefined): Promise<Corre
  * (DomainSendEvent.org_id is required) — fall back to whichever org currently claims this
  * sending domain. It's still a real deliverability event for the domain either way. */
 async function resolveFallbackOrgId(domain: string): Promise<string | undefined> {
-  const org = await Organization.findOne({ sending_domains: domain }).lean();
+  const org = await Organization.findOne({ 'sending_domains.domain': domain }).lean();
   return org?._id.toString();
 }
 
