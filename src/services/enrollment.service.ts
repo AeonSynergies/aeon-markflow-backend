@@ -1,4 +1,5 @@
 import { Enrollment } from '../models/Enrollment.model';
+import { Organization } from '../models/Organization.model';
 import { SavedList } from '../models/SavedList.model';
 import { enqueueStepJob } from '../queues/enrollmentQueue';
 import type { WorkflowStepInput } from '../types/api/workflow';
@@ -23,6 +24,13 @@ export class CrossOrgReferenceError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'CrossOrgReferenceError';
+  }
+}
+
+export class OrganizationNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Organization ${id} not found`);
+    this.name = 'OrganizationNotFoundError';
   }
 }
 
@@ -55,6 +63,9 @@ export async function enrollSavedList(templateId: string, savedListId: string): 
     );
   }
 
+  const org = await Organization.findById(template.org_id).lean();
+  if (!org) throw new OrganizationNotFoundError(template.org_id.toString());
+
   const enrollmentIds: string[] = [];
   let skippedCount = 0;
 
@@ -72,6 +83,8 @@ export async function enrollSavedList(templateId: string, savedListId: string): 
         workflow_template_id: template._id,
         steps,
         requires_warmup: template.requires_warmup ?? false,
+        workflow_type: template.workflow_type ?? null,
+        send_time_strategy: org.send_time_strategy ?? 'manual',
         current_step_index: 0,
         status: 'active',
       });

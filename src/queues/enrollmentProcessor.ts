@@ -3,16 +3,19 @@ import { GUARDRAIL_RETRY_DELAY_MS } from '../constants/sendGuardrail';
 import { waitDurationMs, type WaitUnit } from '../constants/workflow';
 import { createEngagementRecord } from '../services/emailEngagement.service';
 import { resolveSendingRoute } from '../services/domainRouter.service';
+import { getActiveSendTimeRecommendation } from '../services/sendTimeOptimization.service';
 import { insertOpenTrackingPixel, rewriteLinksForTracking } from '../services/linkTracking.service';
 import { canSend, recordSend } from '../services/sendGuardrail.service';
+import { localDayAndHour, nextOccurrenceInTimezone, resolveTimezone } from '../utils/timezone';
 import { Contact } from '../models/Contact.model';
+import { EmailTemplate } from '../models/EmailTemplate.model';
 import { EmailTemplateVersion } from '../models/EmailTemplateVersion.model';
 import { Enrollment, type EnrollmentDocument } from '../models/Enrollment.model';
 import type { WorkflowStep } from '../models/WorkflowTemplate.model';
 import { Lead } from '../models/Lead.model';
 import { LeadActivity } from '../models/LeadActivity.model';
 import { Organization } from '../models/Organization.model';
-import { enqueueGuardrailRetryJob, enqueueStepJob } from './enrollmentQueue';
+import { enqueueGuardrailRetryJob, enqueueSendTimeRetryJob, enqueueStepJob } from './enrollmentQueue';
 
 export class EnrollmentStepError extends Error {
   constructor(message: string, public readonly cause?: unknown) {
@@ -21,14 +24,20 @@ export class EnrollmentStepError extends Error {
   }
 }
 
+export type SendWorkflowEmailResult =
+  | { outcome: 'sent' }
+  | { outcome: 'deferred_guardrail' }
+  | { outcome: 'deferred_send_time'; delayMs: number };
+
 /**
  * Sends the email step, gated by SendGuardrail.canSend() — the one check standing between this
- * function and a Phase 2 adapter, not a separate dashboard nobody looks at. Returns false when
- * the guardrail deferred the send (throttled by the domain's ramp-up cap, or the domain is
- * paused) rather than throwing: this isn't a failure of the step, it's "not yet" — the caller
- * re-schedules the same step instead of advancing past it.
+ * function and a Phase 2 adapter, not a separate dashboard nobody looks at — and, before that,
+ * by send-time optimization (Phase 7) when the enrollment's own send_time_strategy calls for it.
+ * SendGuardrail always has the final word: a slot send-time optimization considers "optimal" that
+ * SendGuardrail would still throttle/pause gets deferred by SendGuardrail's own retry delay, not
+ * overridden or re-picked by send-time logic.
  */
-async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowStep): Promise<boolean> {
+async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowStep): Promise<SendWorkflowEmailResult> {
   const version = await EmailTemplateVersion.findById(step.email_template_version_id).lean();
   if (!version) {
     throw new EnrollmentStepError(`EmailTemplateVersion ${step.email_template_version_id} not found`);
@@ -54,16 +63,38 @@ async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowS
     throw new EnrollmentStepError('email step is missing sending_domain');
   }
 
+  const template = await EmailTemplate.findById(version.email_template_id).lean();
+  const persona = template?.persona ?? null;
+  const orgId = lead.org_id.toString();
+  const timezone = resolveTimezone(contact.timezone);
+
+  if (enrollment.send_time_strategy !== 'manual') {
+    const recommendation = await getActiveSendTimeRecommendation(orgId, enrollment.workflow_type ?? null, persona);
+    // Only applied when the recipient's own timezone matches the recommendation's timezone_bucket
+    // exactly — a recommendation's day/hour is only meaningful within the timezone it was
+    // computed for. A recipient outside that bucket falls straight through to sending now
+    // (manual-equivalent) rather than being deferred against a mismatched clock; multi-timezone
+    // recommendations are a known gap, not yet built (see CLAUDE.md).
+    if (recommendation && recommendation.timezone_bucket === timezone) {
+      const now = new Date();
+      const { dayOfWeek, hour } = localDayAndHour(now, timezone);
+      const inWindow = dayOfWeek === recommendation.day_of_week && hour === recommendation.hour_bucket;
+      if (!inWindow) {
+        const nextSlot = nextOccurrenceInTimezone(now, timezone, recommendation.day_of_week, recommendation.hour_bucket);
+        return { outcome: 'deferred_send_time', delayMs: Math.max(0, nextSlot.getTime() - now.getTime()) };
+      }
+    }
+  }
+
   // Workflow enrollment sends are always MarkFlow's own cold-outreach/sequence sends — always
   // resolved against the org's marketing-purpose domains, never transactional/alerts ones.
   const route = resolveSendingRoute(org, step.sending_domain, 'marketing');
-  const orgId = lead.org_id.toString();
 
   const decision = await canSend(route.domain, route.mailbox, orgId, {
     requiresWarmup: enrollment.requires_warmup ?? false,
   });
   if (!decision.allowed) {
-    return false;
+    return { outcome: 'deferred_guardrail' };
   }
 
   const linkTrackedHtml = await rewriteLinksForTracking(
@@ -76,13 +107,20 @@ async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowS
     env.trackingBaseUrl,
   );
 
+  const sentAt = new Date();
+  const { dayOfWeek, hour } = localDayAndHour(sentAt, timezone);
   const engagement = await createEngagementRecord({
     orgId,
     leadId: enrollment.lead_id.toString(),
     emailTemplateVersionId: version._id.toString(),
     enrollmentId: enrollment._id.toString(),
     workflowStepIndex: enrollment.current_step_index,
-    sentAt: new Date(),
+    sentAt,
+    workflowType: enrollment.workflow_type ?? null,
+    persona,
+    dayOfWeek,
+    hourBucket: hour,
+    timezoneBucket: timezone,
   });
   const trackedHtml = insertOpenTrackingPixel(
     linkTrackedHtml,
@@ -118,7 +156,7 @@ async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowS
     emailTemplateVersionId: version._id.toString(),
   });
 
-  return true;
+  return { outcome: 'sent' };
 }
 
 async function createCallTask(enrollment: EnrollmentDocument, step: WorkflowStep): Promise<void> {
@@ -159,11 +197,17 @@ export async function processEnrollmentStepJob(enrollmentId: string): Promise<vo
       delayMsForNextStep = waitDurationMs(step.wait_amount as number, step.wait_unit as WaitUnit);
       break;
     case 'email': {
-      const sent = await sendWorkflowEmail(enrollment, step);
-      if (!sent) {
+      const result = await sendWorkflowEmail(enrollment, step);
+      if (result.outcome === 'deferred_guardrail') {
         // SendGuardrail deferred this send — leave current_step_index untouched and retry
         // later rather than treating this as a failed job or silently dropping the step.
         await enqueueGuardrailRetryJob(enrollment._id.toString(), enrollment.current_step_index, GUARDRAIL_RETRY_DELAY_MS);
+        return;
+      }
+      if (result.outcome === 'deferred_send_time') {
+        // Send-time optimization deferred this send to its next optimal window — same
+        // "not yet, don't advance" handling, just a different (usually much longer) delay.
+        await enqueueSendTimeRetryJob(enrollment._id.toString(), enrollment.current_step_index, result.delayMs);
         return;
       }
       break;

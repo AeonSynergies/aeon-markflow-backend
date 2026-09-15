@@ -22,6 +22,18 @@ const emailEngagementSchema = new Schema(
     workflow_step_index: { type: Number, default: null },
     sent_at: { type: Date, required: true },
 
+    // Denormalized at send time (from the enrollment's own snapshot and the template's persona)
+    // so send-time performance rollups (Phase 7, sendTimePerformance.service.ts) can aggregate
+    // straight off this collection without joining Enrollment/EmailTemplate per row.
+    workflow_type: { type: String, trim: true, default: null },
+    persona: { type: String, trim: true, default: null },
+    // Recipient-local day-of-week (0=Sun..6=Sat) / hour (0-23) at the moment this was sent,
+    // resolved via the lead's Contact.timezone (falls back to UTC when unknown) — see
+    // src/utils/timezone.ts. Never the server's own timezone.
+    day_of_week: { type: Number, min: 0, max: 6, default: null },
+    hour_bucket: { type: Number, min: 0, max: 23, default: null },
+    timezone_bucket: { type: String, default: null },
+
     opened: { type: Boolean, default: false },
     open_count: { type: Number, default: 0, min: 0 },
     first_opened_at: { type: Date, default: null },
@@ -40,6 +52,8 @@ emailEngagementSchema.index({ email_template_version_id: 1, opened: 1 });
 emailEngagementSchema.index({ email_template_version_id: 1, clicked: 1 });
 // The click redirect's lookup: which send does this (lead, version) click belong to.
 emailEngagementSchema.index({ lead_id: 1, email_template_version_id: 1 });
+// The send-time rollup's window query (sendTimePerformance.service.ts).
+emailEngagementSchema.index({ sent_at: 1 });
 
 export type EmailEngagementDocument = InferSchemaType<typeof emailEngagementSchema> & { _id: Types.ObjectId };
 

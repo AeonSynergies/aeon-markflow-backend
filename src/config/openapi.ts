@@ -46,6 +46,10 @@ export function buildOpenApiSpec(): object {
             properties: {
               name: { type: 'string' },
               requires_warmup: { type: 'boolean', default: false },
+              workflow_type: {
+                type: 'string',
+                description: 'Free-text category (e.g. "cold_outreach") used to roll up send-time performance across templates.',
+              },
               steps: { type: 'array', items: { $ref: '#/components/schemas/WorkflowStepInput' } },
             },
           },
@@ -54,6 +58,7 @@ export function buildOpenApiSpec(): object {
             properties: {
               name: { type: 'string' },
               requires_warmup: { type: 'boolean' },
+              workflow_type: { type: 'string' },
               steps: { type: 'array', items: { $ref: '#/components/schemas/WorkflowStepInput' } },
             },
           },
@@ -64,6 +69,7 @@ export function buildOpenApiSpec(): object {
               org_id: { type: 'string' },
               name: { type: 'string' },
               requires_warmup: { type: 'boolean' },
+              workflow_type: { type: 'string', nullable: true },
               steps: { type: 'array', items: { $ref: '#/components/schemas/WorkflowStepResponse' } },
               createdAt: { type: 'string', format: 'date-time' },
               updatedAt: { type: 'string', format: 'date-time' },

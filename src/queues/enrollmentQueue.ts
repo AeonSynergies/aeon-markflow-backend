@@ -53,6 +53,20 @@ export async function enqueueGuardrailRetryJob(
   );
 }
 
+/**
+ * Re-schedules an enrollment's current email step after send-time optimization (Phase 7)
+ * deferred it to a better window — same fresh-random-jobId reasoning as enqueueGuardrailRetryJob,
+ * kept as its own named helper (rather than reused) so a BullMQ dashboard/log can tell "waiting
+ * for the optimal send-time window" apart from "waiting on SendGuardrail" at a glance.
+ */
+export async function enqueueSendTimeRetryJob(enrollmentId: string, stepIndex: number, delayMs: number): Promise<void> {
+  await getQueue().add(
+    'process-step',
+    { enrollmentId, stepIndex },
+    { jobId: `${enrollmentId}:${stepIndex}:send-time-retry:${randomUUID()}`, delay: delayMs },
+  );
+}
+
 /** Test-only: clears the cached queue so a changed connection/env takes effect. */
 export function resetEnrollmentQueueCache(): void {
   queue = undefined;

@@ -25,6 +25,11 @@ const contactSchema = new Schema(
       sparse: true,
     },
     phone: { type: String, trim: true },
+    // IANA time zone name (e.g. "America/New_York"), when known — send-time optimization
+    // (Phase 7) resolves sends to this contact's own local time rather than the server's.
+    // Nothing currently populates this automatically; nullable, and every consumer must fall
+    // back to UTC when it's missing (see src/utils/timezone.ts).
+    timezone: { type: String, trim: true, default: null },
     firmographics: { type: firmographicsSchema, default: undefined },
     // Hard suppress override — takes precedence over any org-level or lead-level
     // deliverability/DND state.

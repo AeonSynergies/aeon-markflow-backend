@@ -45,6 +45,29 @@ describe('Enrollment model', () => {
     expect(doc.requires_warmup).toBe(true);
   });
 
+  it('defaults workflow_type to null and send_time_strategy to manual', () => {
+    const doc = new Enrollment({
+      lead_id: new Types.ObjectId(),
+      workflow_template_id: new Types.ObjectId(),
+      steps: [validStep()],
+    });
+    expect(doc.workflow_type).toBeNull();
+    expect(doc.send_time_strategy).toBe('manual');
+  });
+
+  it('snapshots an explicit workflow_type and send_time_strategy', () => {
+    const doc = new Enrollment({
+      lead_id: new Types.ObjectId(),
+      workflow_template_id: new Types.ObjectId(),
+      steps: [validStep()],
+      workflow_type: 'cold_outreach',
+      send_time_strategy: 'ai_automatic',
+    });
+    expect(doc.validateSync()).toBeUndefined();
+    expect(doc.workflow_type).toBe('cold_outreach');
+    expect(doc.send_time_strategy).toBe('ai_automatic');
+  });
+
   it('rejects an unknown status', () => {
     const doc = new Enrollment({
       lead_id: new Types.ObjectId(),

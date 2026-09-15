@@ -31,7 +31,37 @@ describe('emailEngagement.service', () => {
         enrollment_id: 'enr-1',
         workflow_step_index: 2,
         sent_at: sentAt,
+        workflow_type: null,
+        persona: null,
+        day_of_week: null,
+        hour_bucket: null,
+        timezone_bucket: null,
       });
+    });
+
+    it('persists the send-time-optimization bucket keys when given', async () => {
+      const sentAt = new Date('2026-01-01');
+      await createEngagementRecord({
+        orgId: 'org-1',
+        leadId: 'lead-1',
+        emailTemplateVersionId: 'ver-1',
+        sentAt,
+        workflowType: 'cold_outreach',
+        persona: 'fedex_isp',
+        dayOfWeek: 2,
+        hourBucket: 9,
+        timezoneBucket: 'America/New_York',
+      });
+
+      expect(EmailEngagement.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workflow_type: 'cold_outreach',
+          persona: 'fedex_isp',
+          day_of_week: 2,
+          hour_bucket: 9,
+          timezone_bucket: 'America/New_York',
+        }),
+      );
     });
   });
 

@@ -4,6 +4,8 @@ import { startEmailAnalyticsWorker } from './queues/emailAnalyticsWorker';
 import { startEnrollmentWorker } from './queues/enrollmentWorker';
 import { scheduleMailboxPolling } from './queues/mailboxPollQueue';
 import { startMailboxPollWorker } from './queues/mailboxPollWorker';
+import { scheduleSendTimeOptimization } from './queues/sendTimePerformanceQueue';
+import { startSendTimePerformanceWorker } from './queues/sendTimePerformanceWorker';
 
 async function main(): Promise<void> {
   await connectDatabase();
@@ -27,6 +29,13 @@ async function main(): Promise<void> {
     console.error(`Email analytics job ${job?.id} failed:`, error);
   });
   await scheduleEmailPerformanceAnalysis();
+
+  const sendTimePerformanceWorker = startSendTimePerformanceWorker();
+  sendTimePerformanceWorker.on('failed', (job, error) => {
+    // eslint-disable-next-line no-console
+    console.error(`Send-time performance job ${job?.id} failed:`, error);
+  });
+  await scheduleSendTimeOptimization();
 
   // eslint-disable-next-line no-console
   console.log('Enrollment worker started');

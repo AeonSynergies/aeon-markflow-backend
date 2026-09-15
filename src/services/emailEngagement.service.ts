@@ -7,6 +7,12 @@ export interface CreateEngagementContext {
   enrollmentId?: string;
   workflowStepIndex?: number;
   sentAt: Date;
+  /** Denormalized send-time-optimization bucket keys — see EmailEngagement.model.ts. */
+  workflowType?: string | null;
+  persona?: string | null;
+  dayOfWeek?: number;
+  hourBucket?: number;
+  timezoneBucket?: string;
 }
 
 /** Creates the per-send engagement row a version's send gets tracked against — call this once, at send time. */
@@ -18,6 +24,11 @@ export async function createEngagementRecord(context: CreateEngagementContext): 
     enrollment_id: context.enrollmentId ?? null,
     workflow_step_index: context.workflowStepIndex ?? null,
     sent_at: context.sentAt,
+    workflow_type: context.workflowType ?? null,
+    persona: context.persona ?? null,
+    day_of_week: context.dayOfWeek ?? null,
+    hour_bucket: context.hourBucket ?? null,
+    timezone_bucket: context.timezoneBucket ?? null,
   });
 }
 
