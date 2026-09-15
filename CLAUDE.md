@@ -50,6 +50,15 @@ SendTimePerformance — rollup: org_id, workflow_type, persona, day_of_week, hou
 UserAccessGrant — { user_id, app: "markflow"|"onboard", org_id (null = all orgs), role, features[] }
 ```
 
+## ⚠️ Blockers before real cold-sending volume — do not miss
+
+- **`SendGuardrail`'s reputation-based safety net has no live data yet** (as of Phase 5, PR #14). The volume ramp-up cap is real and enforced, but bounce/spam-complaint detection is built with no actual data feeding it — Microsoft Graph/Gmail/Zoho don't expose bounce or spam-complaint events via webhook the way a dedicated ESP would. Needed before any real cold-sending volume goes out:
+  1. NDR/bounce parsing via mailbox polling (`fetchNewMessages`) — bounces land as messages in the sending mailbox, not an API event
+  2. Reply detection via the same polling mechanism, tied back to `Lead`/`Enrollment`
+  3. Spam-complaint visibility needs external tooling (Google Postmaster Tools, Microsoft SNDS) with separate domain verification — scope what's realistically integrable vs. what needs manual setup first
+  4. A minimum-sample-size gate (e.g., don't act on a rate below ~100 sends in the window) once real data exists, so noise doesn't trigger false hard-stops
+- Track this to completion explicitly — don't let later phases (A/B testing, send-time optimization) get built assuming reply/bounce signals exist if this hasn't landed yet.
+
 ## The three things that must never be violated
 
 1. **"Response rate" means reply rate / meeting-booked, never open rate**, anywhere in analytics or optimization logic. Opens are unreliable (Apple MPP, Gmail proxy caching).
@@ -72,10 +81,10 @@ Recycled/Win-back lead segment visible to: BD-Sales, BD-Manager, Admin only.
 
 | Integration | Status | Notes |
 |---|---|---|
-| Microsoft 365 (Aeon Synergies domain) | Credentials pending | Graph API, app-only Mail.Send/Mail.Read |
-| Google Workspace (Aeon Miles domain) | Credentials pending | Domain-wide delegation, Gmail API |
-| Zoho Mail (Aeon Sign, Aeon Scheduler domains) | Credentials pending | OAuth app + refresh token |
-| Zoom Phone SMS | Credentials pending | `POST /v2/phone/sms/messages` confirmed to exist; verify plan tier |
+| Microsoft 365 (Aeon Synergies domain) | **Credentials in repo secrets** — ready to build | `MS_CLIENT_ID` / `MS_TENANT_ID` / `MS_CLIENT_SECRET`. Confirm admin consent was granted on Mail.Send/Mail.Read before wiring in — without it the adapter fails at runtime with a permissions error, not at setup. |
+| Google Workspace (Aeon Miles domain) | **Credentials in repo secrets** — ready to build | `GOOGLE_SERVICE_ACCOUNT_JSON` (domain-wide delegation). Required an org-policy exception (`iam.disableServiceAccountKeyCreation`) scoped to the project to issue the key. |
+| Zoho Mail (Aeon Sign, Aeon Scheduler domains) | **Credentials in repo secrets** — ready to build | `ZOHO_CLIENT_ID` / `ZOHO_CLIENT_SECRET` / `ZOHO_REFRESH_TOKEN`, from the Self Client registration (not the Server-based one — that registration is unused). |
+| Zoom Phone SMS | **Blocked — deferred** | `phone_sms:write:admin` (the intended scope) doesn't appear in this account's Server-to-Server app scope picker — matches an active, currently-unresolved Zoom developer forum report of the same gap, not a setup error. Support ticket pending. Fallback identified but not yet implemented: send via **Zoom Contact Center**'s SMS API (`contact_center:write:sms:admin`, which this account does have) instead of Zoom Phone's endpoint — different product, different endpoint/payload shape, needs its own lookup before building. Do not build the Phone-based SMS adapter against this account yet. Call-log read scopes (`phone:read:call_log:admin`, `phone:read:list_call_logs:admin`) are already granted and usable independent of the SMS question, for the call-outcome-logging feature. |
 | Aeon Scheduler | URL-only for now | "Discovery Meeting Scheduled" is an abstract event — Phase 1 raises it manually; swap in the webhook later without redesigning anything downstream |
 | Aeon Sign | Not needed for MarkFlow | Onboard-only integration |
 | GA4 / Microsoft Clarity | Deliberately deferred | Revisit only if templates start linking to marketing pages instead of direct booking/reply actions |
