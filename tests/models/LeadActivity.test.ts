@@ -30,7 +30,23 @@ describe('LeadActivity model', () => {
       subject: 'Re: A simpler way to manage hiring documents',
       body_text: 'Sounds interesting, tell me more.',
       provider_message_id: 'graph-msg-123',
+      provider_thread_id: 'graph-thread-456',
     });
     expect(doc.validateSync()).toBeUndefined();
+    expect(doc.provider_thread_id).toBe('graph-thread-456');
+  });
+
+  it('indexes provider_thread_id for the mailbox poller\'s thread-based correlation', () => {
+    const indexes = LeadActivity.schema.indexes();
+    const threadIndex = indexes.find(([fields]) => fields.provider_thread_id === 1);
+    expect(threadIndex).toBeDefined();
+  });
+
+  it('indexes (provider_message_id, direction) for the mailbox poller\'s idempotency check', () => {
+    const indexes = LeadActivity.schema.indexes();
+    const dedupeIndex = indexes.find(
+      ([fields]) => fields.provider_message_id === 1 && fields.direction === 1,
+    );
+    expect(dedupeIndex).toBeDefined();
   });
 });

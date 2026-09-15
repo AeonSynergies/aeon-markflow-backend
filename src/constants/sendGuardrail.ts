@@ -41,9 +41,13 @@ export const GUARDRAIL_LONG_WINDOW_DAYS = 7;
 /**
  * Below this many sends in a window, a bounce/complaint rate is too noisy to act on (1 bounce
  * out of 3 sends is not a 33% bounce rate in any meaningful sense) — only the raw ramp-up volume
- * cap applies until a window has at least this much data.
+ * cap applies until a window has at least this much data. Bounce/complaint/reply events are now
+ * live (see src/services/mailboxPoller.service.ts) rather than hypothetical, which is exactly
+ * why this floor matters: 100 is deliberately conservative for a brand-new signal — a domain
+ * still in its first days of ramp-up (starting at 20/day) won't even reach this floor in the
+ * fast 24h window, so only the slower 7-day window can act on it early on, by design.
  */
-export const GUARDRAIL_MIN_SAMPLE_SIZE = 20;
+export const GUARDRAIL_MIN_SAMPLE_SIZE = 100;
 
 /** At or above this bounce rate (in either window, once past the minimum sample size), halve the ramp cap. */
 export const THROTTLE_BOUNCE_RATE = 0.02; // 2%

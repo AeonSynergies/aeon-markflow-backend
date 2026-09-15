@@ -141,7 +141,11 @@ describe('processEnrollmentStepJob', () => {
       (Contact.findById as jest.Mock).mockReturnValue(lean({ email: 'lead@example.com' }));
       (Organization.findById as jest.Mock).mockReturnValue(lean({ _id: 'org-1', sending_domains: ['aeonsign.com'] }));
       (rewriteLinksForTracking as jest.Mock).mockResolvedValue('<p>hi <a href="https://track/r/tok">link</a></p>');
-      const send = jest.fn().mockResolvedValue({ providerMessageId: 'msg-1', sentAt: new Date('2026-01-01') });
+      const send = jest.fn().mockResolvedValue({
+        providerMessageId: 'msg-1',
+        providerThreadId: 'thread-1',
+        sentAt: new Date('2026-01-01'),
+      });
       (resolveSendingRoute as jest.Mock).mockReturnValue({
         provider: { send },
         mailbox: 'sales@aeonsign.com',
@@ -186,6 +190,7 @@ describe('processEnrollmentStepJob', () => {
           kind: 'email',
           direction: 'outbound',
           provider_message_id: 'msg-1',
+          provider_thread_id: 'thread-1',
         }),
       );
       expect(recordSend).toHaveBeenCalledWith({

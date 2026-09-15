@@ -88,6 +88,7 @@ async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowS
     subject: version.subject_line,
     body_html: trackedHtml,
     provider_message_id: result.providerMessageId,
+    provider_thread_id: result.providerThreadId,
     occurred_at: result.sentAt,
   });
 
