@@ -5,3 +5,7 @@ export { User } from './User.model';
 export { UserAccessGrant } from './UserAccessGrant.model';
 export { TrackedLink } from './TrackedLink.model';
 export { LinkClick } from './LinkClick.model';
+export { EmailTemplate } from './EmailTemplate.model';
+export { EmailTemplateVersion } from './EmailTemplateVersion.model';
+export { ReviewTask } from './ReviewTask.model';
+export { LeadActivity } from './LeadActivity.model';
