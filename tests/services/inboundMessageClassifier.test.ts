@@ -1,0 +1,129 @@
+import type { InboundMessage } from '../../src/emailProviders/types';
+import { classifySystemMessage, extractReferencedRecipient } from '../../src/services/inboundMessageClassifier';
+
+function message(overrides: Partial<InboundMessage> = {}): InboundMessage {
+  return {
+    providerMessageId: 'msg-1',
+    from: 'someone@example.com',
+    to: ['sales@aeonsign.com'],
+    subject: 'Hello',
+    receivedAt: new Date('2026-01-01'),
+    isRead: false,
+    ...overrides,
+  };
+}
+
+describe('classifySystemMessage', () => {
+  it('classifies a standard MAILER-DAEMON bounce by sender', () => {
+    const bounce = message({
+      from: 'Mail Delivery Subsystem <mailer-daemon@aeonsign.com>',
+      subject: 'Undelivered Mail Returned to Sender',
+      bodyText: 'Delivery to the following recipient failed permanently.',
+    });
+    expect(classifySystemMessage(bounce)).toBe('bounce');
+  });
+
+  it('classifies a bounce by subject alone', () => {
+    const bounce = message({
+      from: 'no-reply@some-relay.example',
+      subject: 'Delivery Status Notification (Failure)',
+    });
+    expect(classifySystemMessage(bounce)).toBe('bounce');
+  });
+
+  it('classifies a postmaster-sourced non-delivery report', () => {
+    const bounce = message({ from: 'postmaster@example.com', subject: 'Returned mail: see transcript' });
+    expect(classifySystemMessage(bounce)).toBe('bounce');
+  });
+
+  it('classifies a feedback-loop complaint by sender', () => {
+    const complaint = message({
+      from: 'Feedback Loop <feedback@yahoo-inc.com>',
+      subject: 'FW: complaint',
+      bodyText: 'Feedback-Type: abuse\nOriginal-Rcpt-To: jane.doe@example.com',
+    });
+    expect(classifySystemMessage(complaint)).toBe('complaint');
+  });
+
+  it('classifies a complaint by the ARF Feedback-Type body marker alone', () => {
+    const complaint = message({
+      from: 'reports@some-isp.example',
+      subject: 'Report',
+      bodyText: 'Feedback-Type: abuse\nUser-Agent: SomeISP/1.0',
+    });
+    expect(classifySystemMessage(complaint)).toBe('complaint');
+  });
+
+  it('classifies a complaint by subject alone', () => {
+    const complaint = message({ from: 'reports@some-isp.example', subject: 'Spam Complaint received' });
+    expect(classifySystemMessage(complaint)).toBe('complaint');
+  });
+
+  it('does not classify an ordinary reply as bounce or complaint', () => {
+    const reply = message({
+      from: 'jane.doe@example.com',
+      subject: 'Re: A simpler way to manage hiring documents',
+      bodyText: 'Sounds interesting, tell me more.',
+    });
+    expect(classifySystemMessage(reply)).toBeNull();
+  });
+
+  it('checks complaint patterns before bounce patterns', () => {
+    // A feedback-loop report can legitimately mention "delivery" in its explanatory text —
+    // complaint sender/subject/body markers should still win.
+    const complaint = message({
+      from: 'feedback@yahoo-inc.com',
+      subject: 'Feedback Report',
+      bodyText: 'Feedback-Type: abuse\nThis message about a prior delivery was reported as spam.',
+    });
+    expect(classifySystemMessage(complaint)).toBe('complaint');
+  });
+});
+
+describe('extractReferencedRecipient', () => {
+  it('extracts the RFC 3464 Final-Recipient machine field', () => {
+    const bounce = message({
+      from: 'mailer-daemon@aeonsign.com',
+      bodyText: 'Delivery failed.\n\nFinal-Recipient: rfc822; Jane.Doe@Example.com\nAction: failed',
+    });
+    expect(extractReferencedRecipient(bounce)).toBe('jane.doe@example.com');
+  });
+
+  it('extracts the RFC 5965 Original-Rcpt-To machine field', () => {
+    const complaint = message({
+      from: 'feedback@yahoo-inc.com',
+      bodyText: 'Feedback-Type: abuse\nOriginal-Rcpt-To: jane.doe@example.com\nOriginal-Mail-From: sales@aeonsign.com',
+    });
+    expect(extractReferencedRecipient(complaint)).toBe('jane.doe@example.com');
+  });
+
+  it('falls back to the first email address that is not the sender', () => {
+    const bounce = message({
+      from: 'mailer-daemon@aeonsign.com',
+      bodyText: 'Your message to jane.doe@example.com could not be delivered.',
+    });
+    expect(extractReferencedRecipient(bounce)).toBe('jane.doe@example.com');
+  });
+
+  it('strips HTML tags before falling back to a plain address match', () => {
+    const bounce = message({
+      from: 'mailer-daemon@aeonsign.com',
+      bodyText: undefined,
+      bodyHtml: '<p>Delivery to <b>jane.doe@example.com</b> failed.</p>',
+    });
+    expect(extractReferencedRecipient(bounce)).toBe('jane.doe@example.com');
+  });
+
+  it('returns undefined when there is no body to search', () => {
+    const bounce = message({ from: 'mailer-daemon@aeonsign.com', bodyText: undefined, bodyHtml: undefined });
+    expect(extractReferencedRecipient(bounce)).toBeUndefined();
+  });
+
+  it('returns undefined when the only address present is the sender itself', () => {
+    const bounce = message({
+      from: 'mailer-daemon@aeonsign.com',
+      bodyText: 'Report generated by mailer-daemon@aeonsign.com',
+    });
+    expect(extractReferencedRecipient(bounce)).toBeUndefined();
+  });
+});

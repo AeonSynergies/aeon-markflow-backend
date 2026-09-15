@@ -151,7 +151,7 @@ describe('sendGuardrail.service', () => {
     });
 
     it('hard-stops and pauses on an extreme bounce rate once the sample size is met', async () => {
-      mockCounts({ sent: 30, bounced: 5, complained: 0, replied: 0 }); // ~16.7% bounce >> 5% hard-stop
+      mockCounts({ sent: 150, bounced: 25, complained: 0, replied: 0 }); // ~16.7% bounce >> 5% hard-stop
       (ReviewTask.create as jest.Mock).mockResolvedValue({ _id: 'review-1' });
 
       const decision = await canSend('x.com', 'sales@x.com', 'org-1', { requiresWarmup: true });
@@ -181,7 +181,7 @@ describe('sendGuardrail.service', () => {
     });
 
     it('still enforces the hard stop when requiresWarmup is false', async () => {
-      mockCounts({ sent: 30, bounced: 5, complained: 0, replied: 0 });
+      mockCounts({ sent: 150, bounced: 25, complained: 0, replied: 0 });
       (ReviewTask.create as jest.Mock).mockResolvedValue({ _id: 'review-1' });
 
       const decision = await canSend('x.com', 'sales@x.com', 'org-1', { requiresWarmup: false });

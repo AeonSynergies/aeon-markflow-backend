@@ -14,6 +14,10 @@ const leadActivitySchema = new Schema(
     body_html: { type: String },
     // Correlates with an EmailProvider SendResult/InboundMessage id.
     provider_message_id: { type: String, trim: true },
+    // Correlates with an EmailProvider SendResult/InboundMessage thread/conversation id — lets
+    // the mailbox poller (src/services/mailboxPoller.service.ts) match an inbound bounce/reply
+    // back to the outbound LeadActivity it responded to.
+    provider_thread_id: { type: String, trim: true },
     occurred_at: { type: Date, required: true, default: () => new Date() },
   },
   { timestamps: true },
@@ -21,6 +25,10 @@ const leadActivitySchema = new Schema(
 
 // Reply drafting reconstructs a lead's thread in chronological order.
 leadActivitySchema.index({ lead_id: 1, occurred_at: 1 });
+// The mailbox poller's primary correlation path: find the outbound send a bounce/reply answers.
+leadActivitySchema.index({ provider_thread_id: 1 }, { sparse: true });
+// Its idempotency check: has this exact inbound message already been logged?
+leadActivitySchema.index({ provider_message_id: 1, direction: 1 }, { sparse: true });
 
 export type LeadActivityDocument = InferSchemaType<typeof leadActivitySchema> & { _id: Types.ObjectId };
 
