@@ -6,6 +6,10 @@ jest.mock('../../src/models/Contact.model', () => ({ Contact: { findById: jest.f
 jest.mock('../../src/models/Organization.model', () => ({ Organization: { findById: jest.fn() } }));
 jest.mock('../../src/models/LeadActivity.model', () => ({ LeadActivity: { create: jest.fn() } }));
 jest.mock('../../src/services/domainRouter.service', () => ({ resolveSendingRoute: jest.fn() }));
+jest.mock('../../src/services/imagePolicy.service', () => ({
+  resolveImageRenderDecision: jest.fn(),
+  renderOrStripImageBlocks: jest.fn(),
+}));
 jest.mock('../../src/services/sendTimeOptimization.service', () => ({ getActiveSendTimeRecommendation: jest.fn() }));
 jest.mock('../../src/services/linkTracking.service', () => ({
   rewriteLinksForTracking: jest.fn(),
@@ -30,6 +34,7 @@ import { enqueueGuardrailRetryJob, enqueueSendTimeRetryJob, enqueueStepJob } fro
 import { EnrollmentStepError, processEnrollmentStepJob } from '../../src/queues/enrollmentProcessor';
 import { resolveSendingRoute } from '../../src/services/domainRouter.service';
 import { createEngagementRecord } from '../../src/services/emailEngagement.service';
+import { resolveImageRenderDecision, renderOrStripImageBlocks } from '../../src/services/imagePolicy.service';
 import { insertOpenTrackingPixel, rewriteLinksForTracking } from '../../src/services/linkTracking.service';
 import { canSend, recordSend } from '../../src/services/sendGuardrail.service';
 import { getActiveSendTimeRecommendation } from '../../src/services/sendTimeOptimization.service';
@@ -150,6 +155,8 @@ describe('processEnrollmentStepJob', () => {
           status: 'APPROVED',
           subject_line: 'Hi',
           body_html: '<p>hi <a href="https://x.com">link</a></p>',
+          image_policy: 'always',
+          image_blocks: [],
         }),
       );
       (EmailTemplate.findById as jest.Mock).mockReturnValue(lean({ persona: null }));
@@ -161,6 +168,8 @@ describe('processEnrollmentStepJob', () => {
         lean({ _id: 'org-1', sending_domains: [{ domain: 'aeonsign.com', purpose: 'marketing' }] }),
       );
       (getActiveSendTimeRecommendation as jest.Mock).mockResolvedValue(null);
+      (resolveImageRenderDecision as jest.Mock).mockResolvedValue(true);
+      (renderOrStripImageBlocks as jest.Mock).mockImplementation((html: string) => html);
       (rewriteLinksForTracking as jest.Mock).mockResolvedValue('<p>hi <a href="https://track/r/tok">link</a></p>');
       (createEngagementRecord as jest.Mock).mockResolvedValue({ _id: { toString: () => 'engagement-1' } });
       (insertOpenTrackingPixel as jest.Mock).mockReturnValue(
@@ -200,6 +209,12 @@ describe('processEnrollmentStepJob', () => {
       expect(canSend).toHaveBeenCalledWith('aeonsign.com', 'sales@aeonsign.com', 'org-1', {
         requiresWarmup: false,
       });
+      expect(resolveImageRenderDecision).toHaveBeenCalledWith({
+        policy: 'always',
+        workflowStepIndex: 0,
+        recipientDomain: 'example.com',
+      });
+      expect(renderOrStripImageBlocks).toHaveBeenCalledWith('<p>hi <a href="https://x.com">link</a></p>', [], true);
       expect(rewriteLinksForTracking).toHaveBeenCalledWith(
         '<p>hi <a href="https://x.com">link</a></p>',
         { orgId: 'org-1', leadId: 'lead-1', emailTemplateVersionId: 'ver-1' },
@@ -286,6 +301,52 @@ describe('processEnrollmentStepJob', () => {
       expect(doc.current_step_index).toBe(0);
       expect(enqueueStepJob).not.toHaveBeenCalled();
       expect(enqueueGuardrailRetryJob).toHaveBeenCalledWith('enr-1', 0, expect.any(Number));
+    });
+
+    describe('image policy', () => {
+      it('resolves the decision from the version policy and workflow step index, and sends the stripped/rendered html', async () => {
+        const { send } = mockEmailPipeline();
+        (EmailTemplateVersion.findById as jest.Mock).mockReturnValue(
+          lean({
+            _id: { toString: () => 'ver-1' },
+            email_template_id: 'tpl-1',
+            status: 'APPROVED',
+            subject_line: 'Hi',
+            body_html: '<p>hi <img data-block-id="hero" /></p>',
+            image_policy: 'auto',
+            image_blocks: [{ block_id: 'hero', alt_text: 'Hero', placeholder_src: 'https://cdn/hero.png' }],
+          }),
+        );
+        (resolveImageRenderDecision as jest.Mock).mockResolvedValue(false);
+        (renderOrStripImageBlocks as jest.Mock).mockReturnValue('<p>hi </p>');
+        (rewriteLinksForTracking as jest.Mock).mockResolvedValue('<p>hi </p>');
+        mockEnrollment({
+          current_step_index: 2,
+          steps: [
+            { kind: 'wait' },
+            { kind: 'wait' },
+            { kind: 'email', email_template_version_id: 'ver-1', sending_domain: 'aeonsign.com' },
+          ],
+        });
+
+        await processEnrollmentStepJob('enr-1');
+
+        expect(resolveImageRenderDecision).toHaveBeenCalledWith({
+          policy: 'auto',
+          workflowStepIndex: 2,
+          recipientDomain: 'example.com',
+        });
+        expect(renderOrStripImageBlocks).toHaveBeenCalledWith(
+          '<p>hi <img data-block-id="hero" /></p>',
+          [{ block_id: 'hero', alt_text: 'Hero', placeholder_src: 'https://cdn/hero.png' }],
+          false,
+        );
+        expect(rewriteLinksForTracking).toHaveBeenCalledWith('<p>hi </p>', expect.anything(), expect.any(String));
+        expect(send).toHaveBeenCalledWith(
+          'sales@aeonsign.com',
+          expect.objectContaining({ html: expect.stringContaining('hi') }),
+        );
+      });
     });
 
     describe('send-time optimization deferral', () => {

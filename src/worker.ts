@@ -1,4 +1,6 @@
 import { connectDatabase } from './config/database';
+import { scheduleCrossOrgInsightComputation } from './queues/crossOrgInsightQueue';
+import { startCrossOrgInsightWorker } from './queues/crossOrgInsightWorker';
 import { scheduleEmailPerformanceAnalysis } from './queues/emailAnalyticsQueue';
 import { startEmailAnalyticsWorker } from './queues/emailAnalyticsWorker';
 import { startEnrollmentWorker } from './queues/enrollmentWorker';
@@ -36,6 +38,13 @@ async function main(): Promise<void> {
     console.error(`Send-time performance job ${job?.id} failed:`, error);
   });
   await scheduleSendTimeOptimization();
+
+  const crossOrgInsightWorker = startCrossOrgInsightWorker();
+  crossOrgInsightWorker.on('failed', (job, error) => {
+    // eslint-disable-next-line no-console
+    console.error(`Cross-org insight job ${job?.id} failed:`, error);
+  });
+  await scheduleCrossOrgInsightComputation();
 
   // eslint-disable-next-line no-console
   console.log('Enrollment worker started');

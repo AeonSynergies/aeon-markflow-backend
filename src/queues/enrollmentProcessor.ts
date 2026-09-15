@@ -1,8 +1,10 @@
 import { env } from '../config/env';
+import type { ImagePolicy } from '../constants/emailTemplate';
 import { GUARDRAIL_RETRY_DELAY_MS } from '../constants/sendGuardrail';
 import { waitDurationMs, type WaitUnit } from '../constants/workflow';
 import { createEngagementRecord } from '../services/emailEngagement.service';
 import { resolveSendingRoute } from '../services/domainRouter.service';
+import { resolveImageRenderDecision, renderOrStripImageBlocks } from '../services/imagePolicy.service';
 import { getActiveSendTimeRecommendation } from '../services/sendTimeOptimization.service';
 import { insertOpenTrackingPixel, rewriteLinksForTracking } from '../services/linkTracking.service';
 import { canSend, recordSend } from '../services/sendGuardrail.service';
@@ -97,8 +99,16 @@ async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowS
     return { outcome: 'deferred_guardrail' };
   }
 
+  const recipientDomain = contact.email.split('@')[1] ?? '';
+  const shouldRenderImages = await resolveImageRenderDecision({
+    policy: version.image_policy as ImagePolicy,
+    workflowStepIndex: enrollment.current_step_index,
+    recipientDomain,
+  });
+  const imageProcessedHtml = renderOrStripImageBlocks(version.body_html, version.image_blocks, shouldRenderImages);
+
   const linkTrackedHtml = await rewriteLinksForTracking(
-    version.body_html,
+    imageProcessedHtml,
     {
       orgId: lead.org_id.toString(),
       leadId: enrollment.lead_id.toString(),
