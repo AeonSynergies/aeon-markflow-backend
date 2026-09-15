@@ -52,38 +52,26 @@ UserAccessGrant — { user_id, app: "markflow"|"onboard", org_id (null = all org
 
 ## Go-live status: SendGuardrail data sources
 
-**Resolved as of PR #17.** Bounce/reply detection is live via a mailbox poller (`mailboxPoller.service.ts`, 5-min BullMQ job) — heuristic classification, not full RFC 3464/5965 parsing (the provider abstraction only exposes decoded body text, not raw MIME parts; revisit if that ever changes). Minimum sample size raised to 100.
+✅ **Bounce/reply detection — done** (PR #17). `mailboxPoller.service.ts`, every 5 min per configured mailbox via `fetchNewMessages`. Heuristic classification (sender/subject/body patterns), not full RFC 3464 parsing — `InboundMessage` only exposes decoded body text/html, not raw MIME parts. Replies correlate via `LeadActivity.provider_thread_id`, falling back to sender-address matching; only counted when attributable to a known lead. Never marks non-deliverability mail as read (these are real, human-monitored inboxes too).
 
-**Spam-complaint visibility — researched, decided:**
-- **Yahoo/AOL Complaint Feedback Loop**: realistically integrable now, no new code needed — classifier already handles the shape. **Remaining: enroll each sending domain's DKIM signing domain at Sender Hub (ops task, not code)** — confirm each domain's DKIM is actually configured first.
-- **Google Postmaster Tools**: aggregate-only (30-day domain-wide rate, no per-message signal) — low value during ramp-up, worth doing eventually as a separate, lower-priority project, different ingestion shape than `DomainSendEvent`.
-- **Microsoft SNDS/JMRP**: not usable given current architecture — requires registering dedicated sending IPs, and sends go through Graph/Gmail/Zoho's shared multi-tenant IPs. Only relevant if MarkFlow ever sends over its own dedicated IP/SMTP relay.
+✅ **Minimum sample size raised 20 → 100** (`GUARDRAIL_MIN_SAMPLE_SIZE`).
 
-## Go-live status: AI analytics/optimization + A/B testing (Phase 6)
+⚠️ **Spam-complaint visibility — mixed, researched 2026-09:**
+- **Yahoo/AOL Complaint Feedback Loop**: realistically integrable now, zero new code — the poller's existing complaint heuristics already match ARF's shape. Remaining: enroll each domain's DKIM signing domain (the `d=` value + selector) at Sender Hub — an ops task, keyed off DKIM not the mailbox address, so confirm DKIM is actually configured per-tenant first.
+- **Google Postmaster Tools**: aggregate-only (30-day domain-wide rate, no per-message signal) — the *only* Gmail complaint signal that exists at all. Needs DNS verification + sufficient volume before any data appears. Gmail's Postmaster API is mid-transition (v1 live, v2 rolling out) — check current docs before building. Separate, lower-priority project (different ingestion shape — periodic snapshot, not `DomainSendEvent`).
+- **Microsoft SNDS/JMRP**: not usable — per-IP, requires registering *owned* sending IPs; MarkFlow sends via Graph/Gmail/Zoho's shared multi-tenant infrastructure, nothing to register. Only relevant if sending architecture ever moves to a dedicated IP/SMTP relay.
 
-**Built.** `emailPerformanceAnalysis.service.ts` runs a diagnosis-by-symptom waterfall over every `EmailTemplate`'s live (`current_version_id`) version, in delivery-funnel order, stopping at the first symptom found: `high_bounce_rate` → `low_open_rate` (relative to this org's own baseline, never absolute) → `no_click_through` → `no_reply_after_click`. Scheduled daily via `emailAnalyticsQueue.ts`/`emailAnalyticsWorker.ts` (`runEmailPerformanceAnalysis` in `emailOptimization.service.ts`), also callable on demand.
+Bounce/reply signals are fully live. Spam-complaint signal is only partial (Yahoo/AOL, once DKIM-enrolled) — don't let later phases assume Google/Microsoft complaint data exists.
 
-- `high_bounce_rate` never produces a content suggestion — it opens a `ReviewTask` (`kind: 'email_version_deliverability'`) so a human investigates the version itself, separate from whatever SendGuardrail is doing about the domain overall.
-- Every other symptom produces a new `EmailTemplateVersion` in `DRAFT` status, under a brand-new variant `EmailTemplate` sharing the incumbent's `ab_group_id` — never replacing the incumbent outright. `ai_generation_metadata.reason` states the diagnosis symptom, the metrics behind it, and the model's own stated angle. Same `PENDING_APPROVAL` human-in-the-loop gate as Phase 3 — a diagnosis-driven draft is never auto-applied.
-- Per-send open/click tracking is a new `EmailEngagement` model (one row per send), fed by a genuinely new open-tracking pixel (`GET /o/:token`, undocumented in the OpenAPI spec, matching the existing `/r/:token` click-redirect precedent) and the existing link-tracking redirect. Open rate is used **only** as a weak, this-org's-own-baseline-relative comparison — never as an absolute threshold, and never conflated with "response rate" (rule #1 below still holds: that's reply rate / meeting-booked only).
-- A/B testing: `abTesting.service.ts`. `ensureAbGroupId`/`createVariantTemplate` set up the group; traffic is split at **enrollment-snapshot time** (`resolveStepForEnrollment`, wired into `enrollment.service.ts`), not at send time — once resolved, the choice freezes into that enrollment's own steps snapshot, same "never latest" guarantee as everything else. A group with 0-1 live (`current_version_id` set) variants is a no-op. `promoteWinner` requires a template-approver role and throws `InsufficientAbTestSampleError` until every live variant clears the minimum sample size — never called automatically, since which variant wins is a strategy call, not a safety mechanism.
+## Domain purpose model — refines `Organization.sending_domains[]`
 
-**Proposed numeric defaults — not yet reviewed, all in `src/constants/emailAnalytics.ts`:**
+Each org uses subdomains by purpose, not one flat domain per org: `mail.*` for marketing (MarkFlow's workflow engine sends), main domain for transactional (existing nodemailer system, untouched), `alert.`/`notify.*` for system alerts. `sending_domains[]` should be `{ domain, purpose: "marketing" | "transactional" | "alerts" }[]`, not a flat string array — `DomainRouter` needs to pick by purpose, not just by org. **MarkFlow's own internal notifications** (`ReviewTask` alerts, `SendGuardrail` pause notifications) should route through the `alerts` purpose domain, not the `marketing` one — don't mix internal notification sending with cold-outreach sending reputation.
 
-| Constant | Default | What it gates |
-|---|---|---|
-| `MIN_SAMPLE_SIZE_FOR_VERSION_ANALYSIS` | 30 sends | Below this, a version isn't diagnosed at all (mirrors SendGuardrail's minimum-sample-size principle) |
-| `MIN_DENOMINATOR_FOR_SUBRATE` | 10 | Minimum opens (for click-through) / clicks (for reply-among-clickers) before that sub-rate is trusted |
-| `MIN_BASELINE_COMPARABLE_VERSIONS` | 3 versions | Minimum number of this org's other sufficiently-sampled versions needed before a baseline open rate is trusted enough to diagnose `low_open_rate` against |
-| `LOW_OPEN_RATE_RELATIVE_THRESHOLD` | 0.75× baseline | How far below the org's own average open rate counts as "low" |
-| `LOW_CLICK_THROUGH_RATE` | 10% | Click-through rate (of opens) below which `no_click_through` fires |
-| `LOW_REPLY_AMONG_CLICKERS_RATE` | 5% | Reply rate (of clickers) below which `no_reply_after_click` fires |
-| `AB_TEST_MIN_SAMPLE_SIZE_PER_VARIANT` | 200 sends | Minimum sends per variant before `promoteWinner` will allow a decision |
-| `EMAIL_ANALYTICS_POLL_INTERVAL_MS` | 24 hours | How often the scheduled analysis run fires — daily, not the mailbox poller's 5 minutes, since content performance doesn't need minute-level reaction |
+## Yahoo/AOL CFL — deprioritized, not abandoned
 
-The `high_bounce_rate` check reuses SendGuardrail's own `THROTTLE_BOUNCE_RATE` rather than a separate threshold, so the two systems agree on what "too many bounces" means.
+DKIM setup continues regardless (valuable for deliverability to every provider). The Sender Hub CFL *signup* step specifically is deprioritized: it only yields complaint signal for Yahoo/AOL-hosted recipients, and very few leads use those addresses given the ICP. Revisit if the lead mix ever shifts toward more consumer webmail.
 
-## The three things that must never be violated
+
 
 1. **"Response rate" means reply rate / meeting-booked, never open rate**, anywhere in analytics or optimization logic. Opens are unreliable (Apple MPP, Gmail proxy caching).
 2. **Human-in-the-loop gates are real gates**: AI-generated template content and AI-suggested workflow/optimization changes sit in `DRAFT`/`PENDING_APPROVAL` until a human with the right role approves — never auto-applied. Exception: sending guardrails (domain warmup/throttling) can act autonomously — safety mechanism, not a content/strategy judgment call.
