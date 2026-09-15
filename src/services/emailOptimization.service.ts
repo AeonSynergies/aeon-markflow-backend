@@ -4,6 +4,7 @@ import { ReviewTask, type ReviewTaskDocument } from '../models/ReviewTask.model'
 import { createVariantTemplate } from './abTesting.service';
 import { generateEmailDraft } from './emailGeneration.service';
 import { diagnoseVersion, type SymptomDiagnosis } from './emailPerformanceAnalysis.service';
+import { sendInternalNotification } from './internalNotification.service';
 
 /** A variant is already in flight for this template's ab_group if one exists with no APPROVED
  * version yet — don't pile up a second suggestion on top of an unresolved one. */
@@ -95,13 +96,22 @@ export async function flagVersionDeliverabilityIssue(
 ): Promise<ReviewTaskDocument | null> {
   if (await hasOpenDeliverabilityFlag(versionId)) return null;
 
-  return ReviewTask.create({
+  const reviewTask = await ReviewTask.create({
     org_id: orgId,
     kind: 'email_version_deliverability',
     email_template_version_id: versionId,
     status: 'OPEN',
     rejection_reason: diagnosis.reason,
   });
+
+  await sendInternalNotification({
+    subject: '[MarkFlow] Deliverability issue flagged for review',
+    html:
+      `<p>EmailTemplateVersion ${versionId} was flagged for a deliverability issue by the diagnosis-by-symptom pipeline.</p>` +
+      `<p>Reason: ${diagnosis.reason}</p>`,
+  });
+
+  return reviewTask;
 }
 
 export interface AnalysisRunSummary {

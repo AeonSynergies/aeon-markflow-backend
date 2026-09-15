@@ -7,11 +7,13 @@ jest.mock('../../src/models/DomainGuardrailState.model', () => ({
 jest.mock('../../src/models/ReviewTask.model', () => ({
   ReviewTask: { create: jest.fn(), findByIdAndUpdate: jest.fn() },
 }));
+jest.mock('../../src/services/internalNotification.service', () => ({ sendInternalNotification: jest.fn() }));
 
 import { DomainGuardrailState } from '../../src/models/DomainGuardrailState.model';
 import { DomainSendEvent } from '../../src/models/DomainSendEvent.model';
 import { ReviewTask } from '../../src/models/ReviewTask.model';
 import { UnauthorizedApproverRoleError } from '../../src/services/emailTemplateVersion.service';
+import { sendInternalNotification } from '../../src/services/internalNotification.service';
 import {
   canSend,
   getRampCapForDomain,
@@ -91,15 +93,19 @@ describe('sendGuardrail.service', () => {
         expect.objectContaining({ status: 'paused', paused_reason: 'bounce rate too high', review_task_id: 'review-1' }),
         { upsert: true },
       );
+      expect(sendInternalNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ subject: expect.stringContaining('x.com') }),
+      );
     });
 
-    it('is a no-op when the domain is already paused (no duplicate ReviewTask)', async () => {
+    it('is a no-op when the domain is already paused (no duplicate ReviewTask or notification)', async () => {
       (DomainGuardrailState.findOne as jest.Mock).mockResolvedValue({ status: 'paused' });
 
       await pauseDomain('x.com', 'sales@x.com', 'org-1', 'still bad');
 
       expect(ReviewTask.create).not.toHaveBeenCalled();
       expect(DomainGuardrailState.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(sendInternalNotification).not.toHaveBeenCalled();
     });
   });
 
