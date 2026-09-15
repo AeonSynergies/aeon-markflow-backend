@@ -1,5 +1,6 @@
 import express, { type Express } from 'express';
 import cors from 'cors';
+import { trackingRouter } from './routes/tracking.routes';
 
 export function createApp(): Express {
   const app = express();
@@ -10,6 +11,8 @@ export function createApp(): Express {
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok' });
   });
+
+  app.use(trackingRouter);
 
   return app;
 }
