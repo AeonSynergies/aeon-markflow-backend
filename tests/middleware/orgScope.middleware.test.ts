@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { attachOrgScope, requireOrgAccess } from '../../src/middleware/orgScope.middleware';
+import { attachOrgScope, requireOrgAccess, requireRole } from '../../src/middleware/orgScope.middleware';
 import * as orgAccessService from '../../src/services/orgAccess.service';
 
 jest.mock('../../src/services/orgAccess.service');
@@ -64,6 +64,43 @@ describe('requireOrgAccess', () => {
     const next = jest.fn();
 
     requireOrgAccess((r) => (r.params as { orgId: string }).orgId)(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+});
+
+describe('requireRole', () => {
+  it('401s when there is no resolved org access', () => {
+    const req = {} as Request;
+    const res = mockRes();
+    const next = jest.fn();
+
+    requireRole(['ADMIN'])(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("403s when none of the caller's roles are allowed", () => {
+    const req = { orgAccess: { allOrgs: true, orgIds: [], roles: ['BD_LEAD_GEN' as const] } } as unknown as Request;
+    const res = mockRes();
+    const next = jest.fn();
+
+    requireRole(['ADMIN', 'BD_SALES'])(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('calls next when one of the caller\'s roles is allowed', () => {
+    const req = {
+      orgAccess: { allOrgs: true, orgIds: [], roles: ['BD_SALES' as const, 'BD_LEAD_GEN' as const] },
+    } as unknown as Request;
+    const res = mockRes();
+    const next = jest.fn();
+
+    requireRole(['ADMIN', 'BD_SALES'])(req, res, next);
 
     expect(next).toHaveBeenCalled();
     expect(res.status).not.toHaveBeenCalled();

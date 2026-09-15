@@ -9,3 +9,6 @@ export { EmailTemplate } from './EmailTemplate.model';
 export { EmailTemplateVersion } from './EmailTemplateVersion.model';
 export { ReviewTask } from './ReviewTask.model';
 export { LeadActivity } from './LeadActivity.model';
+export { WorkflowTemplate } from './WorkflowTemplate.model';
+export { Enrollment } from './Enrollment.model';
+export { SavedList } from './SavedList.model';

@@ -1,0 +1,406 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Aeon MarkFlow API",
+    "version": "0.1.0",
+    "description": "Aeon MarkFlow backend API — leads, engagement workflows, discovery calls."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "components": {
+    "schemas": {
+      "WorkflowStepInput": {
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "email",
+              "call_task",
+              "sms",
+              "wait"
+            ]
+          },
+          "email_template_version_id": {
+            "type": "string",
+            "description": "Required, email only — pins a specific approved EmailTemplateVersion, never \"latest\"."
+          },
+          "sending_domain": {
+            "type": "string",
+            "description": "Required, email only."
+          },
+          "sms_body": {
+            "type": "string",
+            "description": "Required, sms only."
+          },
+          "call_task_instructions": {
+            "type": "string",
+            "description": "Required, call_task only."
+          },
+          "wait_amount": {
+            "type": "number",
+            "description": "Required, wait only."
+          },
+          "wait_unit": {
+            "type": "string",
+            "enum": [
+              "minutes",
+              "hours",
+              "days"
+            ],
+            "description": "Required, wait only."
+          }
+        }
+      },
+      "WorkflowStepResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WorkflowStepInput"
+          },
+          {
+            "type": "object",
+            "required": [
+              "_id"
+            ],
+            "properties": {
+              "_id": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "CreateWorkflowTemplateRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "steps"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "requires_warmup": {
+            "type": "boolean",
+            "default": false
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowStepInput"
+            }
+          }
+        }
+      },
+      "UpdateWorkflowTemplateRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "requires_warmup": {
+            "type": "boolean"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowStepInput"
+            }
+          }
+        }
+      },
+      "WorkflowTemplateResponse": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "requires_warmup": {
+            "type": "boolean"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowStepResponse"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "EnrollSavedListRequest": {
+        "type": "object",
+        "required": [
+          "saved_list_id"
+        ],
+        "properties": {
+          "saved_list_id": {
+            "type": "string"
+          }
+        }
+      },
+      "EnrollSavedListResponse": {
+        "type": "object",
+        "properties": {
+          "enrolled_count": {
+            "type": "integer"
+          },
+          "skipped_count": {
+            "type": "integer"
+          },
+          "enrollment_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/orgs/{orgId}/workflow-templates": {
+      "post": {
+        "summary": "Create a workflow template",
+        "tags": [
+          "WorkflowTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkflowTemplateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowTemplateResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List workflow templates for an org",
+        "tags": [
+          "WorkflowTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WorkflowTemplateResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/workflow-templates/{templateId}": {
+      "get": {
+        "summary": "Get a single workflow template",
+        "tags": [
+          "WorkflowTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowTemplateResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Edit a workflow template (name, requires_warmup, and/or steps)",
+        "description": "Never affects an Enrollment already running against this template — Enrollment.steps is a separate, frozen snapshot taken at enrollment time.\n",
+        "tags": [
+          "WorkflowTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWorkflowTemplateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowTemplateResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/workflow-templates/{templateId}/enrollments": {
+      "post": {
+        "summary": "Enroll every lead in a SavedList into this workflow template",
+        "tags": [
+          "Enrollments"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnrollSavedListRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollSavedListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty template, or the SavedList belongs to a different org"
+          },
+          "404": {
+            "description": "Template or SavedList not found"
+          }
+        }
+      }
+    }
+  },
+  "tags": []
+}
