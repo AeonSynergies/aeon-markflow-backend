@@ -1,13 +1,6 @@
 import { Schema } from 'mongoose';
 import { STEP_KINDS, WAIT_UNITS } from '../../constants/workflow';
-
-type StepContext = { kind?: string };
-
-function requiredFor(kind: string, message: string): [(this: StepContext) => boolean, string] {
-  return [function requiredForKind(this: StepContext) {
-    return this.kind === kind;
-  }, message];
-}
+import { requiredWhenKindIs as requiredFor } from '../../utils/mongooseValidators';
 
 /**
  * One step in a workflow sequence (email | call_task | sms | wait). Shared between

@@ -10,6 +10,11 @@ const enrollmentSchema = new Schema(
     // WorkflowTemplate, so editing a template can never silently change a sequence a lead is
     // already enrolled in.
     steps: { type: [workflowStepSchema], required: true },
+    // Same snapshot reasoning as steps: SendGuardrail reads this to decide whether to apply
+    // ramp-up throttling to this enrollment's email sends (see sendGuardrail.service.ts). Frozen
+    // at enrollment time so toggling a template's warmup flag never silently changes behavior
+    // for a lead already mid-sequence.
+    requires_warmup: { type: Boolean, default: false },
     current_step_index: { type: Number, default: 0, min: 0 },
     status: { type: String, enum: ENROLLMENT_STATUSES, default: 'active', required: true },
     started_at: { type: Date, default: () => new Date() },

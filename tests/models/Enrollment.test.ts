@@ -26,6 +26,25 @@ describe('Enrollment model', () => {
     expect(doc.completed_at).toBeNull();
   });
 
+  it('defaults requires_warmup to false', () => {
+    const doc = new Enrollment({
+      lead_id: new Types.ObjectId(),
+      workflow_template_id: new Types.ObjectId(),
+      steps: [validStep()],
+    });
+    expect(doc.requires_warmup).toBe(false);
+  });
+
+  it('snapshots requires_warmup: true when set', () => {
+    const doc = new Enrollment({
+      lead_id: new Types.ObjectId(),
+      workflow_template_id: new Types.ObjectId(),
+      steps: [validStep()],
+      requires_warmup: true,
+    });
+    expect(doc.requires_warmup).toBe(true);
+  });
+
   it('rejects an unknown status', () => {
     const doc = new Enrollment({
       lead_id: new Types.ObjectId(),

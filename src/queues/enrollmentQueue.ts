@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { Queue } from 'bullmq';
 import { getRedisConnection } from '../config/redis';
 
@@ -27,6 +28,28 @@ export async function enqueueStepJob(enrollmentId: string, stepIndex: number, de
     'process-step',
     { enrollmentId, stepIndex },
     { jobId: `${enrollmentId}:${stepIndex}`, delay: delayMs },
+  );
+}
+
+/**
+ * Re-schedules an enrollment's current step after SendGuardrail deferred it (throttled or a
+ * paused domain). Uses a fresh, random jobId every call rather than the stable
+ * `${enrollmentId}:${step}` one enqueueStepJob uses: BullMQ treats `add()` with a jobId that
+ * already exists — even one that already completed — as a no-op, which would otherwise silently
+ * swallow the retry. A random suffix (rather than just a timestamp) also avoids two retries
+ * enqueued within the same millisecond colliding with each other. The processor re-reads
+ * current_step_index from the Enrollment document itself, so it doesn't need stepIndex to be
+ * exact — it's carried along only for visibility into what's being retried.
+ */
+export async function enqueueGuardrailRetryJob(
+  enrollmentId: string,
+  stepIndex: number,
+  delayMs: number,
+): Promise<void> {
+  await getQueue().add(
+    'process-step',
+    { enrollmentId, stepIndex },
+    { jobId: `${enrollmentId}:${stepIndex}:guardrail-retry:${randomUUID()}`, delay: delayMs },
   );
 }
 

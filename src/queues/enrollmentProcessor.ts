@@ -1,7 +1,9 @@
 import { env } from '../config/env';
+import { GUARDRAIL_RETRY_DELAY_MS } from '../constants/sendGuardrail';
 import { waitDurationMs, type WaitUnit } from '../constants/workflow';
 import { resolveSendingRoute } from '../services/domainRouter.service';
 import { rewriteLinksForTracking } from '../services/linkTracking.service';
+import { canSend, recordSend } from '../services/sendGuardrail.service';
 import { Contact } from '../models/Contact.model';
 import { EmailTemplateVersion } from '../models/EmailTemplateVersion.model';
 import { Enrollment, type EnrollmentDocument } from '../models/Enrollment.model';
@@ -9,7 +11,7 @@ import type { WorkflowStep } from '../models/WorkflowTemplate.model';
 import { Lead } from '../models/Lead.model';
 import { LeadActivity } from '../models/LeadActivity.model';
 import { Organization } from '../models/Organization.model';
-import { enqueueStepJob } from './enrollmentQueue';
+import { enqueueGuardrailRetryJob, enqueueStepJob } from './enrollmentQueue';
 
 export class EnrollmentStepError extends Error {
   constructor(message: string, public readonly cause?: unknown) {
@@ -18,7 +20,14 @@ export class EnrollmentStepError extends Error {
   }
 }
 
-async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowStep): Promise<void> {
+/**
+ * Sends the email step, gated by SendGuardrail.canSend() — the one check standing between this
+ * function and a Phase 2 adapter, not a separate dashboard nobody looks at. Returns false when
+ * the guardrail deferred the send (throttled by the domain's ramp-up cap, or the domain is
+ * paused) rather than throwing: this isn't a failure of the step, it's "not yet" — the caller
+ * re-schedules the same step instead of advancing past it.
+ */
+async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowStep): Promise<boolean> {
   const version = await EmailTemplateVersion.findById(step.email_template_version_id).lean();
   if (!version) {
     throw new EnrollmentStepError(`EmailTemplateVersion ${step.email_template_version_id} not found`);
@@ -44,7 +53,15 @@ async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowS
     throw new EnrollmentStepError('email step is missing sending_domain');
   }
 
-  const { provider, mailbox } = resolveSendingRoute(org, step.sending_domain);
+  const route = resolveSendingRoute(org, step.sending_domain);
+  const orgId = lead.org_id.toString();
+
+  const decision = await canSend(route.domain, route.mailbox, orgId, {
+    requiresWarmup: enrollment.requires_warmup ?? false,
+  });
+  if (!decision.allowed) {
+    return false;
+  }
 
   const trackedHtml = await rewriteLinksForTracking(
     version.body_html,
@@ -56,7 +73,7 @@ async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowS
     env.trackingBaseUrl,
   );
 
-  const result = await provider.send(mailbox, {
+  const result = await route.provider.send(route.mailbox, {
     to: [contact.email],
     subject: version.subject_line,
     html: trackedHtml,
@@ -73,6 +90,16 @@ async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowS
     provider_message_id: result.providerMessageId,
     occurred_at: result.sentAt,
   });
+
+  await recordSend({
+    domain: route.domain,
+    mailbox: route.mailbox,
+    orgId,
+    leadId: enrollment.lead_id.toString(),
+    enrollmentId: enrollment._id.toString(),
+  });
+
+  return true;
 }
 
 async function createCallTask(enrollment: EnrollmentDocument, step: WorkflowStep): Promise<void> {
@@ -112,9 +139,16 @@ export async function processEnrollmentStepJob(enrollmentId: string): Promise<vo
     case 'wait':
       delayMsForNextStep = waitDurationMs(step.wait_amount as number, step.wait_unit as WaitUnit);
       break;
-    case 'email':
-      await sendWorkflowEmail(enrollment, step);
+    case 'email': {
+      const sent = await sendWorkflowEmail(enrollment, step);
+      if (!sent) {
+        // SendGuardrail deferred this send — leave current_step_index untouched and retry
+        // later rather than treating this as a failed job or silently dropping the step.
+        await enqueueGuardrailRetryJob(enrollment._id.toString(), enrollment.current_step_index, GUARDRAIL_RETRY_DELAY_MS);
+        return;
+      }
       break;
+    }
     case 'call_task':
       await createCallTask(enrollment, step);
       break;

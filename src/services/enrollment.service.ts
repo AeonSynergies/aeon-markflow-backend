@@ -62,6 +62,7 @@ export async function enrollSavedList(templateId: string, savedListId: string): 
         lead_id: leadId,
         workflow_template_id: template._id,
         steps: template.steps,
+        requires_warmup: template.requires_warmup ?? false,
         current_step_index: 0,
         status: 'active',
       });
