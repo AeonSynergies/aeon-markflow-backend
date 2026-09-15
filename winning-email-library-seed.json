@@ -1,0 +1,57 @@
+{
+  "_comment": "Seed data for the Winning Email Library, extracted from real Aeon Sign and Aeon Miles templates already in use. Each entry maps to an EmailTemplate + one approved EmailTemplateVersion, per CLAUDE.md's schema. generation_source is 'human' for all of these (pre-existing, not AI-drafted) so they are safe to use as few-shot grounding examples immediately. org_id/persona/workflow_position fields are placeholders to be set to real ObjectIds once Organization records exist.",
+
+  "aeon_sign_templates": {
+    "org": "aeon_sign",
+    "persona_segments": ["amazon_dsp_afp", "fedex_isp", "other_logistics"],
+    "product_story_anchor": "Send → Collect → Track → Store",
+    "primary_cta": "book a 30-minute demo (Calendly link)",
+    "secondary_cta": "aeonsign.com free-signup link",
+    "sequence": [
+      { "step": 1, "day_offset": 0, "persona": "amazon_dsp_afp", "subject": "A simpler way to manage hiring documents at {{Company}}", "position": "cold_open" },
+      { "step": 2, "day_offset": 3, "persona": "amazon_dsp_afp", "subject": "Re: A simpler way to manage hiring documents at {{Company}}", "position": "follow_up_1" },
+      { "step": 1, "day_offset": 0, "persona": "fedex_isp", "subject": "Simplify employee onboarding at {{Company}}", "position": "cold_open" },
+      { "step": 2, "day_offset": 3, "persona": "fedex_isp", "subject": "Re: Simplify employee onboarding at {{Company}}", "position": "follow_up_1" },
+      { "step": 3, "day_offset": 7, "persona": "fedex_isp", "subject": "Managing employee documents at {{Company}}", "position": "follow_up_2" },
+      { "step": 4, "day_offset": 21, "persona": "fedex_isp", "subject": "You can try Aeon Sign for free", "position": "follow_up_3" },
+      { "step": 5, "day_offset": 28, "persona": "fedex_isp", "subject": "Should I close the loop?", "position": "breakup" },
+      { "step": 1, "day_offset": 0, "persona": "other_logistics", "subject": "Simplify document workflows at {{Company}}", "position": "cold_open" },
+      { "step": "universal", "day_offset": null, "persona": "any", "subject": "How are you tracking pending documents?", "position": "process_question_fallback" },
+      { "step": "universal", "day_offset": null, "persona": "any", "subject": "A quick follow-up on Aeon Sign", "position": "value_reminder_fallback" },
+      { "step": "universal", "day_offset": null, "persona": "any", "subject": "Should I close the loop?", "position": "breakup_fallback" }
+    ],
+    "notes": "Full body copy for each of these is in the source documents (Aeon_Sign_Amazon.docx, Aeon_Sign_FedEx.docx, Aeon_Sign_Final_Cold_Email_Templates.docx) — paste full bodies into EmailTemplateVersion.body_html per entry when seeding. Amazon DSP/AFP and FedEx ISP are combined as one audience per the campaign notes in the source doc, since their Aeon Sign use cases are similar."
+  },
+
+  "aeon_miles_templates": {
+    "org": "aeon_miles",
+    "persona_segments": ["amazon_dsp_owner"],
+    "primary_cta": "10-30 minute discovery call",
+    "sequence": [
+      { "step": 1, "channel": "email", "day_offset": 0, "subject": "A simpler way to manage the work behind your DSP", "position": "cold_open", "notes": "Introduces without pricing/packages/long description" },
+      { "step": 2, "channel": "email", "day_offset": 3, "subject": "How much is your team handling outside the routes?", "position": "workload_angle" },
+      { "step": 3, "channel": "call", "day_offset": null, "position": "discovery_call_1", "notes": "Placed after email 2, not before. Goal is discovery, not closing. If asked pricing, redirect to understanding their current setup first." },
+      { "step": 4, "channel": "email", "day_offset": 3, "day_offset_from": "call_1_if_no_conversation", "subject": "One area worth taking a closer look at", "position": "financial_value_angle" },
+      { "step": 5, "channel": "email", "day_offset": 4, "subject": "You don't have to outsource everything", "position": "objection_removal", "notes": "Answers the unstated objection 'why would I outsource my operation' — start-small framing" },
+      { "step": 6, "channel": "email", "day_offset": null, "subject": "Could we start with one area?", "position": "trial_low_risk_entry", "notes": "Keep this one shorter than the others" },
+      { "step": 7, "channel": "call", "day_offset": null, "position": "discovery_call_2_final", "notes": "Final human touch after email 6. Keep quick, not a 'desperate final attempt' tone. If 'not right now': ask about later in the year (this is the recycle/win-back branch point). If 'interested': exit automation immediately into the sales process." }
+    ],
+    "exit_conditions": [
+      "Reply indicates interest → move out of automation into sales process immediately (do not continue the sequence)",
+      "Reply/call indicates 'not now' → offer nurture (later-in-year) branch rather than continuing the same cadence — this is the real-world precedent for the Lost+Recycle/win-back design in CLAUDE.md"
+    ],
+    "notes": "Full body copy is in Email_and_Calling_Aeon_Miles.docx; call scripts (including objection handling and voicemail script) are in Cold_calling_script.docx. Both should be pasted in full when seeding EmailTemplateVersion / a CallScript reference."
+  },
+
+  "aeon_recruitpro_templates": {
+    "org": "aeon_recruitpro",
+    "sequence": [],
+    "notes": "No source material exists yet. Cold start — do not seed anything here until real templates or at least a product brief exists. Do not reuse Aeon Miles/Sign content for this org; different market per the product-context resolution."
+  },
+
+  "aeon_scheduler_templates": {
+    "org": "aeon_scheduler",
+    "sequence": [],
+    "notes": "No source material exists yet. Cold start."
+  }
+}
