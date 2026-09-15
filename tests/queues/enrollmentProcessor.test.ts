@@ -144,7 +144,9 @@ describe('processEnrollmentStepJob', () => {
         lean({ contact_id: 'contact-1', org_id: { toString: () => 'org-1' } }),
       );
       (Contact.findById as jest.Mock).mockReturnValue(lean({ email: 'lead@example.com' }));
-      (Organization.findById as jest.Mock).mockReturnValue(lean({ _id: 'org-1', sending_domains: ['aeonsign.com'] }));
+      (Organization.findById as jest.Mock).mockReturnValue(
+        lean({ _id: 'org-1', sending_domains: [{ domain: 'aeonsign.com', purpose: 'marketing' }] }),
+      );
       (rewriteLinksForTracking as jest.Mock).mockResolvedValue('<p>hi <a href="https://track/r/tok">link</a></p>');
       (createEngagementRecord as jest.Mock).mockResolvedValue({ _id: { toString: () => 'engagement-1' } });
       (insertOpenTrackingPixel as jest.Mock).mockReturnValue(
@@ -177,8 +179,9 @@ describe('processEnrollmentStepJob', () => {
       await processEnrollmentStepJob('enr-1');
 
       expect(resolveSendingRoute).toHaveBeenCalledWith(
-        expect.objectContaining({ sending_domains: ['aeonsign.com'] }),
+        expect.objectContaining({ sending_domains: [{ domain: 'aeonsign.com', purpose: 'marketing' }] }),
         'aeonsign.com',
+        'marketing',
       );
       expect(canSend).toHaveBeenCalledWith('aeonsign.com', 'sales@aeonsign.com', 'org-1', {
         requiresWarmup: false,
