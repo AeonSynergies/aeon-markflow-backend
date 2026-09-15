@@ -27,9 +27,8 @@ export type ImagePolicy = (typeof IMAGE_POLICIES)[number];
 export const GENERATION_SOURCES = ['ai', 'human', 'ai_edited_by_human'] as const;
 export type GenerationSource = (typeof GENERATION_SOURCES)[number];
 
-export const REVIEW_TASK_STATUSES = ['OPEN', 'APPROVED', 'REJECTED'] as const;
-export type ReviewTaskStatus = (typeof REVIEW_TASK_STATUSES)[number];
-
 // Per CLAUDE.md's human-in-the-loop rule and RBAC table: AI-generated/AI-suggested content
-// never auto-applies — only these roles may approve or reject an EmailTemplateVersion.
+// never auto-applies — only these roles may approve or reject an EmailTemplateVersion. Also
+// reused by SendGuardrail for resuming a paused domain (src/services/sendGuardrail.service.ts) —
+// an equally consequential "a human signed off on this" action.
 export const TEMPLATE_APPROVER_ROLES: Role[] = ['SUPER_ADMIN', 'ADMIN', 'BD_MANAGER', 'BD_SALES'];

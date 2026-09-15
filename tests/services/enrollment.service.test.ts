@@ -67,12 +67,25 @@ describe('enrollment.service enrollSavedList', () => {
       lead_id: 'lead-1',
       workflow_template_id: { toString: expect.any(Function) },
       steps: [{ kind: 'wait', wait_amount: 1, wait_unit: 'days' }],
+      requires_warmup: false,
       current_step_index: 0,
       status: 'active',
     });
     expect(enqueueStepJob).toHaveBeenNthCalledWith(1, 'enr-1', 0, 0);
     expect(enqueueStepJob).toHaveBeenNthCalledWith(2, 'enr-2', 0, 0);
     expect(result).toEqual({ enrolledCount: 2, skippedCount: 0, enrollmentIds: ['enr-1', 'enr-2'] });
+  });
+
+  it('snapshots requires_warmup: true from the template onto each enrollment', async () => {
+    mockTemplate({ requires_warmup: true });
+    (SavedList.findById as jest.Mock).mockReturnValue({
+      lean: jest.fn().mockResolvedValue({ org_id: { toString: () => 'org-1' }, lead_ids: ['lead-1'] }),
+    });
+    (Enrollment.create as jest.Mock).mockResolvedValueOnce({ _id: { toString: () => 'enr-1' } });
+
+    await enrollSavedList('tpl-1', 'list-1');
+
+    expect(Enrollment.create).toHaveBeenCalledWith(expect.objectContaining({ requires_warmup: true }));
   });
 
   it('skips a lead that already has an active enrollment (duplicate key) without failing the batch', async () => {

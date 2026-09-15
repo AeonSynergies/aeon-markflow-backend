@@ -12,3 +12,5 @@ export { LeadActivity } from './LeadActivity.model';
 export { WorkflowTemplate } from './WorkflowTemplate.model';
 export { Enrollment } from './Enrollment.model';
 export { SavedList } from './SavedList.model';
+export { DomainSendEvent } from './DomainSendEvent.model';
+export { DomainGuardrailState } from './DomainGuardrailState.model';
