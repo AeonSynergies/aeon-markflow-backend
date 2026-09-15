@@ -181,6 +181,92 @@
             "type": "string"
           }
         }
+      },
+      "EmailTemplateResponse": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "persona": {
+            "type": "string"
+          },
+          "workflow_position": {
+            "type": "string"
+          },
+          "current_version_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "EmailTemplateVersionResponse": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string"
+          },
+          "email_template_id": {
+            "type": "string"
+          },
+          "version_number": {
+            "type": "integer"
+          },
+          "subject_line": {
+            "type": "string"
+          },
+          "body_html": {
+            "type": "string"
+          },
+          "image_policy": {
+            "type": "string",
+            "enum": [
+              "always",
+              "never",
+              "auto"
+            ]
+          },
+          "generation_source": {
+            "type": "string",
+            "enum": [
+              "ai",
+              "human",
+              "ai_edited_by_human"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "PENDING_APPROVAL",
+              "APPROVED",
+              "REJECTED",
+              "RESUBMITTED"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       }
     }
   },
@@ -397,6 +483,99 @@
           },
           "404": {
             "description": "Template or SavedList not found"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/email-templates": {
+      "get": {
+        "summary": "List email templates for an org",
+        "tags": [
+          "EmailTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EmailTemplateResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/email-templates/{templateId}/versions": {
+      "get": {
+        "summary": "List an email template's versions",
+        "description": "Pass status=APPROVED to get the set safe to pin a workflow email step to — a WorkflowStep pins to a specific EmailTemplateVersion id, never \"latest\".\n",
+        "tags": [
+          "EmailTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "DRAFT",
+                "PENDING_APPROVAL",
+                "APPROVED",
+                "REJECTED",
+                "RESUBMITTED"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EmailTemplateVersionResponse"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
           }
         }
       }
