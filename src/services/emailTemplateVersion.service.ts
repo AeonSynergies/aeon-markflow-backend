@@ -55,6 +55,21 @@ async function nextVersionNumber(emailTemplateId: string): Promise<number> {
 }
 
 /**
+ * Lists an EmailTemplate's versions, newest first. Callers building a workflow step picker
+ * should pass status: 'APPROVED' — a WorkflowStep pins to a specific version id, never
+ * "latest", so only APPROVED versions are ever safe to offer as a pin target.
+ */
+export async function listEmailTemplateVersions(
+  emailTemplateId: string,
+  status?: EmailTemplateVersionStatus,
+): Promise<EmailTemplateVersionDocument[]> {
+  return EmailTemplateVersion.find({
+    email_template_id: emailTemplateId,
+    ...(status ? { status } : {}),
+  }).sort({ version_number: -1 });
+}
+
+/**
  * Generates an AI draft via Claude and persists it as a new DRAFT EmailTemplateVersion. This
  * never submits it for review itself — per CLAUDE.md's human-in-the-loop rule, AI content only
  * moves out of DRAFT when a human explicitly calls submitForReview.
