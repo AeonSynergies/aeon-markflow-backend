@@ -1,6 +1,8 @@
 import { Enrollment } from '../models/Enrollment.model';
 import { SavedList } from '../models/SavedList.model';
 import { enqueueStepJob } from '../queues/enrollmentQueue';
+import type { WorkflowStepInput } from '../types/api/workflow';
+import { resolveStepForEnrollment } from './abTesting.service';
 import { getWorkflowTemplate } from './workflowTemplate.service';
 
 export class SavedListNotFoundError extends Error {
@@ -58,10 +60,17 @@ export async function enrollSavedList(templateId: string, savedListId: string): 
 
   for (const leadId of savedList.lead_ids) {
     try {
+      // Resolved independently per lead: an A/B group's traffic split is a per-enrollment coin
+      // flip, not a batch-wide choice (see abTesting.service.ts's own doc comment). Converted to
+      // plain objects first — resolveStepForEnrollment takes the API-shaped WorkflowStepInput,
+      // not a live Mongoose subdocument.
+      const plainSteps = JSON.parse(JSON.stringify(template.steps)) as WorkflowStepInput[];
+      const steps = await Promise.all(plainSteps.map(resolveStepForEnrollment));
+
       const enrollment = await Enrollment.create({
         lead_id: leadId,
         workflow_template_id: template._id,
-        steps: template.steps,
+        steps,
         requires_warmup: template.requires_warmup ?? false,
         current_step_index: 0,
         status: 'active',

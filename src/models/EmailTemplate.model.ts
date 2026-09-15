@@ -8,7 +8,9 @@ const emailTemplateSchema = new Schema(
     // persona/position keys (e.g. persona: 'fedex_isp', workflow_position: 'cold_open').
     persona: { type: String, trim: true },
     workflow_position: { type: String, trim: true },
-    // No AbGroup collection yet (Phase 6/7) — plain id, not a ref.
+    // Groups an incumbent with its challenger variant(s) for A/B testing (Phase 6) — plain id,
+    // not a ref, since there's still no separate AbGroup collection: every EmailTemplate sharing
+    // one just IS a variant in that test. See abTesting.service.ts.
     ab_group_id: { type: Schema.Types.ObjectId, default: null },
     current_version_id: { type: Schema.Types.ObjectId, ref: 'EmailTemplateVersion', default: null },
   },

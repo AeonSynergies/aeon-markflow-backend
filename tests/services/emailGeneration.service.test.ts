@@ -112,6 +112,36 @@ describe('emailGeneration.service', () => {
     expect(callArgs.system).toContain('drafting a REPLY');
   });
 
+  it('grounds a diagnosis_revision draft in the diagnosis and current content, using a fixed user message', async () => {
+    mockTemplate();
+    parseMock.mockResolvedValueOnce({
+      parsed_output: { subject_line: 'A clearer ask', body_html: '<p>New</p>', reason: 'Softened the CTA' },
+    });
+
+    await generateEmailDraft({
+      emailTemplateId: 'tpl-1',
+      request: {
+        type: 'diagnosis_revision',
+        symptom: 'no_reply_after_click',
+        diagnosisReason: 'Clicked 20% of opens but replied 0% of clicks over 40 sends.',
+        currentSubjectLine: 'Quick chat?',
+        currentBodyHtml: '<p>Book 30 minutes with me.</p>',
+      },
+    });
+
+    expect(getSeedStructureExamples).not.toHaveBeenCalled();
+    expect(getLeadEmailThread).not.toHaveBeenCalled();
+
+    const [[callArgs]] = parseMock.mock.calls;
+    expect(callArgs.messages[0].content).toBe('Apply the diagnosis above and produce the revised email.');
+    expect(callArgs.system).toContain('revising an existing, already-approved email');
+    expect(callArgs.system).toContain('Clicked 20% of opens but replied 0% of clicks over 40 sends.');
+    expect(callArgs.system).toContain('Soften the call-to-action');
+    expect(callArgs.system).toContain('Quick chat?');
+    expect(callArgs.system).toContain('Book 30 minutes with me.');
+    expect(callArgs.system).toContain('enters as a new A/B variant');
+  });
+
   it('wraps a missing parsed_output in an EmailGenerationError', async () => {
     mockTemplate();
     parseMock.mockResolvedValueOnce({ parsed_output: null });

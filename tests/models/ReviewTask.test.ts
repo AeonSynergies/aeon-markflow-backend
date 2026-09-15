@@ -55,4 +55,23 @@ describe('ReviewTask model', () => {
     });
     expect(doc.validateSync()).toBeUndefined();
   });
+
+  it('requires email_template_version_id (not domain) when kind is email_version_deliverability', () => {
+    const doc = new ReviewTask({
+      org_id: new Types.ObjectId(),
+      kind: 'email_version_deliverability',
+    });
+    const err = doc.validateSync();
+    expect(err?.errors.email_template_version_id).toBeDefined();
+    expect(err?.errors.domain).toBeUndefined();
+  });
+
+  it('validates an email_version_deliverability review task with a version set', () => {
+    const doc = new ReviewTask({
+      org_id: new Types.ObjectId(),
+      kind: 'email_version_deliverability',
+      email_template_version_id: new Types.ObjectId(),
+    });
+    expect(doc.validateSync()).toBeUndefined();
+  });
 });

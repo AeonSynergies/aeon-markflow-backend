@@ -63,6 +63,7 @@ describe('sendGuardrail.service', () => {
         org_id: 'org-1',
         lead_id: 'lead-1',
         enrollment_id: null,
+        email_template_version_id: null,
         kind: 'sent',
       });
     });
