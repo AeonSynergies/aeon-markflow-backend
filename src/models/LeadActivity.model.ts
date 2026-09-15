@@ -8,6 +8,11 @@ const leadActivitySchema = new Schema(
     // Set once the enrollment engine (Phase 4) exists.
     enrollment_id: { type: Schema.Types.ObjectId, ref: 'Enrollment', default: null },
     workflow_step_index: { type: Number, default: null },
+    // Which EmailTemplateVersion this was — set on outbound sends directly, and on inbound
+    // replies via the mailbox poller's correlation. The diagnosis-by-symptom analysis
+    // (src/services/emailPerformanceAnalysis.service.ts) uses this to compute a version's reply
+    // rate without joining through Enrollment.steps.
+    email_template_version_id: { type: Schema.Types.ObjectId, ref: 'EmailTemplateVersion', default: null },
     direction: { type: String, enum: LEAD_ACTIVITY_DIRECTIONS, default: null },
     subject: { type: String, trim: true },
     body_text: { type: String },
@@ -29,6 +34,8 @@ leadActivitySchema.index({ lead_id: 1, occurred_at: 1 });
 leadActivitySchema.index({ provider_thread_id: 1 }, { sparse: true });
 // Its idempotency check: has this exact inbound message already been logged?
 leadActivitySchema.index({ provider_message_id: 1, direction: 1 }, { sparse: true });
+// The diagnosis pipeline's per-version reply-rate query.
+leadActivitySchema.index({ email_template_version_id: 1, kind: 1, direction: 1 }, { sparse: true });
 
 export type LeadActivityDocument = InferSchemaType<typeof leadActivitySchema> & { _id: Types.ObjectId };
 

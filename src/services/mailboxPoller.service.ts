@@ -16,6 +16,7 @@ const POLL_BATCH_SIZE = 100;
 interface CorrelatedActivity {
   leadId: string;
   enrollmentId?: string;
+  emailTemplateVersionId?: string;
   orgId: string;
 }
 
@@ -38,6 +39,7 @@ async function correlateByThread(providerThreadId: string | undefined): Promise<
   return {
     leadId: activity.lead_id.toString(),
     enrollmentId: activity.enrollment_id?.toString(),
+    emailTemplateVersionId: activity.email_template_version_id?.toString(),
     orgId: lead.org_id.toString(),
   };
 }
@@ -71,6 +73,7 @@ async function correlateByEmailAddress(email: string | undefined): Promise<Corre
   return {
     leadId: best.activity.lead_id.toString(),
     enrollmentId: best.activity.enrollment_id?.toString(),
+    emailTemplateVersionId: best.activity.email_template_version_id?.toString(),
     orgId: best.orgId,
   };
 }
@@ -118,6 +121,7 @@ async function processDeliverabilityMessage(
   await recordDeliverabilityEvent(domain, mailbox, orgId, kind, {
     leadId: correlated?.leadId,
     enrollmentId: correlated?.enrollmentId,
+    emailTemplateVersionId: correlated?.emailTemplateVersionId,
   });
   summary[kind] += 1;
 
@@ -151,6 +155,7 @@ async function processCandidateReply(message: InboundMessage, domain: string, ma
     kind: 'email',
     direction: 'inbound',
     enrollment_id: correlated.enrollmentId ?? null,
+    email_template_version_id: correlated.emailTemplateVersionId ?? null,
     subject: message.subject,
     body_text: message.bodyText,
     body_html: message.bodyHtml,
@@ -162,6 +167,7 @@ async function processCandidateReply(message: InboundMessage, domain: string, ma
   await recordDeliverabilityEvent(domain, mailbox, correlated.orgId, 'replied', {
     leadId: correlated.leadId,
     enrollmentId: correlated.enrollmentId,
+    emailTemplateVersionId: correlated.emailTemplateVersionId,
   });
   summary.replied += 1;
 }

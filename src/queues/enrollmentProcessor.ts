@@ -1,8 +1,9 @@
 import { env } from '../config/env';
 import { GUARDRAIL_RETRY_DELAY_MS } from '../constants/sendGuardrail';
 import { waitDurationMs, type WaitUnit } from '../constants/workflow';
+import { createEngagementRecord } from '../services/emailEngagement.service';
 import { resolveSendingRoute } from '../services/domainRouter.service';
-import { rewriteLinksForTracking } from '../services/linkTracking.service';
+import { insertOpenTrackingPixel, rewriteLinksForTracking } from '../services/linkTracking.service';
 import { canSend, recordSend } from '../services/sendGuardrail.service';
 import { Contact } from '../models/Contact.model';
 import { EmailTemplateVersion } from '../models/EmailTemplateVersion.model';
@@ -63,7 +64,7 @@ async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowS
     return false;
   }
 
-  const trackedHtml = await rewriteLinksForTracking(
+  const linkTrackedHtml = await rewriteLinksForTracking(
     version.body_html,
     {
       orgId: lead.org_id.toString(),
@@ -71,6 +72,19 @@ async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowS
       emailTemplateVersionId: version._id.toString(),
     },
     env.trackingBaseUrl,
+  );
+
+  const engagement = await createEngagementRecord({
+    orgId,
+    leadId: enrollment.lead_id.toString(),
+    emailTemplateVersionId: version._id.toString(),
+    enrollmentId: enrollment._id.toString(),
+    workflowStepIndex: enrollment.current_step_index,
+    sentAt: new Date(),
+  });
+  const trackedHtml = insertOpenTrackingPixel(
+    linkTrackedHtml,
+    `${env.trackingBaseUrl.replace(/\/+$/, '')}/o/${engagement._id.toString()}`,
   );
 
   const result = await route.provider.send(route.mailbox, {
@@ -85,6 +99,7 @@ async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowS
     direction: 'outbound',
     enrollment_id: enrollment._id,
     workflow_step_index: enrollment.current_step_index,
+    email_template_version_id: version._id,
     subject: version.subject_line,
     body_html: trackedHtml,
     provider_message_id: result.providerMessageId,
@@ -98,6 +113,7 @@ async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowS
     orgId,
     leadId: enrollment.lead_id.toString(),
     enrollmentId: enrollment._id.toString(),
+    emailTemplateVersionId: version._id.toString(),
   });
 
   return true;

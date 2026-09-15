@@ -104,6 +104,7 @@ export async function recordSend(context: {
   orgId: string;
   leadId?: string;
   enrollmentId?: string;
+  emailTemplateVersionId?: string;
 }): Promise<void> {
   await DomainSendEvent.create({
     domain: context.domain,
@@ -111,26 +112,21 @@ export async function recordSend(context: {
     org_id: context.orgId,
     lead_id: context.leadId ?? null,
     enrollment_id: context.enrollmentId ?? null,
+    email_template_version_id: context.emailTemplateVersionId ?? null,
     kind: 'sent',
   });
 }
 
 /**
- * Records a bounce/complaint/reply outcome for a domain. Nothing in this codebase calls this
- * yet: there is no ESP webhook receiver (Microsoft Graph change notifications, Gmail Pub/Sub
- * push, Zoho's webhook mechanism) and no inbound-message poller using EmailProvider's own
- * fetchNewMessages, so bounce/complaint/reply rates always read as zero from real data today.
- * This function is the integration point a future webhook handler or poller should call — the
- * rate-based throttle/hard-stop logic below is fully implemented and tested against it, it just
- * has no live inputs yet. Flagging this clearly rather than silently shipping a guardrail that
- * looks complete but can never actually detect a bad domain by rate.
+ * Records a bounce/complaint/reply outcome for a domain — called live by the mailbox poller
+ * (src/services/mailboxPoller.service.ts) as it classifies inbound messages.
  */
 export async function recordDeliverabilityEvent(
   domain: string,
   mailbox: string,
   orgId: string,
   kind: Exclude<SendEventKind, 'sent'>,
-  context: { leadId?: string; enrollmentId?: string } = {},
+  context: { leadId?: string; enrollmentId?: string; emailTemplateVersionId?: string } = {},
 ): Promise<void> {
   await DomainSendEvent.create({
     domain,
@@ -138,6 +134,7 @@ export async function recordDeliverabilityEvent(
     org_id: orgId,
     lead_id: context.leadId ?? null,
     enrollment_id: context.enrollmentId ?? null,
+    email_template_version_id: context.emailTemplateVersionId ?? null,
     kind,
   });
 }

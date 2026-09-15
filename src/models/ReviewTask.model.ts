@@ -1,6 +1,6 @@
 import { Schema, model, type InferSchemaType, type Types } from 'mongoose';
 import { REVIEW_TASK_KINDS, REVIEW_TASK_STATUSES } from '../constants/reviewTask';
-import { requiredWhenKindIs } from '../utils/mongooseValidators';
+import { requiredWhenKindIs, requiredWhenKindIsOneOf } from '../utils/mongooseValidators';
 
 const reviewTaskSchema = new Schema(
   {
@@ -11,7 +11,10 @@ const reviewTaskSchema = new Schema(
     email_template_version_id: {
       type: Schema.Types.ObjectId,
       ref: 'EmailTemplateVersion',
-      required: requiredWhenKindIs('email_template_version', 'email_template_version_id is required when kind is email_template_version'),
+      required: requiredWhenKindIsOneOf(
+        ['email_template_version', 'email_version_deliverability'],
+        'email_template_version_id is required when kind is email_template_version or email_version_deliverability',
+      ),
     },
     // Set by SendGuardrail when it pauses a domain (Phase 5) — see sendGuardrail.service.ts.
     domain: {

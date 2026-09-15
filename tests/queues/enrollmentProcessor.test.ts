@@ -5,7 +5,11 @@ jest.mock('../../src/models/Contact.model', () => ({ Contact: { findById: jest.f
 jest.mock('../../src/models/Organization.model', () => ({ Organization: { findById: jest.fn() } }));
 jest.mock('../../src/models/LeadActivity.model', () => ({ LeadActivity: { create: jest.fn() } }));
 jest.mock('../../src/services/domainRouter.service', () => ({ resolveSendingRoute: jest.fn() }));
-jest.mock('../../src/services/linkTracking.service', () => ({ rewriteLinksForTracking: jest.fn() }));
+jest.mock('../../src/services/linkTracking.service', () => ({
+  rewriteLinksForTracking: jest.fn(),
+  insertOpenTrackingPixel: jest.fn(),
+}));
+jest.mock('../../src/services/emailEngagement.service', () => ({ createEngagementRecord: jest.fn() }));
 jest.mock('../../src/services/sendGuardrail.service', () => ({ canSend: jest.fn(), recordSend: jest.fn() }));
 jest.mock('../../src/queues/enrollmentQueue', () => ({
   enqueueStepJob: jest.fn(),
@@ -21,7 +25,8 @@ import { Organization } from '../../src/models/Organization.model';
 import { enqueueGuardrailRetryJob, enqueueStepJob } from '../../src/queues/enrollmentQueue';
 import { EnrollmentStepError, processEnrollmentStepJob } from '../../src/queues/enrollmentProcessor';
 import { resolveSendingRoute } from '../../src/services/domainRouter.service';
-import { rewriteLinksForTracking } from '../../src/services/linkTracking.service';
+import { createEngagementRecord } from '../../src/services/emailEngagement.service';
+import { insertOpenTrackingPixel, rewriteLinksForTracking } from '../../src/services/linkTracking.service';
 import { canSend, recordSend } from '../../src/services/sendGuardrail.service';
 
 function lean(value: unknown) {
@@ -141,6 +146,10 @@ describe('processEnrollmentStepJob', () => {
       (Contact.findById as jest.Mock).mockReturnValue(lean({ email: 'lead@example.com' }));
       (Organization.findById as jest.Mock).mockReturnValue(lean({ _id: 'org-1', sending_domains: ['aeonsign.com'] }));
       (rewriteLinksForTracking as jest.Mock).mockResolvedValue('<p>hi <a href="https://track/r/tok">link</a></p>');
+      (createEngagementRecord as jest.Mock).mockResolvedValue({ _id: { toString: () => 'engagement-1' } });
+      (insertOpenTrackingPixel as jest.Mock).mockReturnValue(
+        '<p>hi <a href="https://track/r/tok">link</a></p><img src="pixel" />',
+      );
       const send = jest.fn().mockResolvedValue({
         providerMessageId: 'msg-1',
         providerThreadId: 'thread-1',
@@ -179,16 +188,30 @@ describe('processEnrollmentStepJob', () => {
         { orgId: 'org-1', leadId: 'lead-1', emailTemplateVersionId: 'ver-1' },
         expect.any(String),
       );
+      expect(createEngagementRecord).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orgId: 'org-1',
+          leadId: 'lead-1',
+          emailTemplateVersionId: 'ver-1',
+          enrollmentId: 'enr-1',
+          workflowStepIndex: 0,
+        }),
+      );
+      expect(insertOpenTrackingPixel).toHaveBeenCalledWith(
+        '<p>hi <a href="https://track/r/tok">link</a></p>',
+        expect.stringContaining('/o/engagement-1'),
+      );
       expect(send).toHaveBeenCalledWith('sales@aeonsign.com', {
         to: ['lead@example.com'],
         subject: 'Hi',
-        html: '<p>hi <a href="https://track/r/tok">link</a></p>',
+        html: '<p>hi <a href="https://track/r/tok">link</a></p><img src="pixel" />',
       });
       expect(LeadActivity.create).toHaveBeenCalledWith(
         expect.objectContaining({
           lead_id: doc.lead_id,
           kind: 'email',
           direction: 'outbound',
+          email_template_version_id: { toString: expect.any(Function) },
           provider_message_id: 'msg-1',
           provider_thread_id: 'thread-1',
         }),
@@ -199,6 +222,7 @@ describe('processEnrollmentStepJob', () => {
         orgId: 'org-1',
         leadId: 'lead-1',
         enrollmentId: 'enr-1',
+        emailTemplateVersionId: 'ver-1',
       });
       expect(enqueueStepJob).toHaveBeenCalledWith('enr-1', 1, 0);
     });

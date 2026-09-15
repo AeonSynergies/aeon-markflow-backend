@@ -171,6 +171,31 @@ describe('mailboxPoller.service', () => {
         expect(summary.bounced).toBe(0);
       });
 
+      it('propagates the correlated email_template_version_id through to recordDeliverabilityEvent', async () => {
+        const message = inboundMessage({ from: 'mailer-daemon@aeonsign.com' });
+        const provider = mockProvider([message]);
+        (classifySystemMessage as jest.Mock).mockReturnValue('bounce');
+        (extractReferencedRecipient as jest.Mock).mockReturnValue('jane.doe@example.com');
+        (Contact.findOne as jest.Mock).mockReturnValue(lean({ _id: 'contact-1' }));
+        (Lead.find as jest.Mock).mockReturnValue(lean([{ _id: 'lead-1', org_id: { toString: () => 'org-1' } }]));
+        (LeadActivity.findOne as jest.Mock).mockReturnValue(
+          sortLean({
+            lead_id: { toString: () => 'lead-1' },
+            enrollment_id: { toString: () => 'enr-1' },
+            email_template_version_id: { toString: () => 'ver-1' },
+            occurred_at: new Date('2026-01-02'),
+          }),
+        );
+
+        await pollMailbox('aeonsign.com', 'sales@aeonsign.com', provider);
+
+        expect(recordDeliverabilityEvent).toHaveBeenCalledWith('aeonsign.com', 'sales@aeonsign.com', 'org-1', 'bounced', {
+          leadId: 'lead-1',
+          enrollmentId: 'enr-1',
+          emailTemplateVersionId: 'ver-1',
+        });
+      });
+
       it('skips a bounce/complaint-shaped message that is already marked read (already processed)', async () => {
         const message = inboundMessage({ from: 'mailer-daemon@aeonsign.com', isRead: true });
         const provider = mockProvider([message]);
@@ -222,6 +247,31 @@ describe('mailboxPoller.service', () => {
         });
         expect(provider.markAsRead).not.toHaveBeenCalled();
         expect(summary.replied).toBe(1);
+      });
+
+      it('propagates the correlated email_template_version_id into the logged LeadActivity and recordDeliverabilityEvent', async () => {
+        const message = inboundMessage({ from: 'jane.doe@example.com', providerThreadId: 'thread-1' });
+        const provider = mockProvider([message]);
+        (classifySystemMessage as jest.Mock).mockReturnValue(null);
+        (LeadActivity.findOne as jest.Mock).mockReturnValue(
+          sortLean({
+            lead_id: { toString: () => 'lead-1' },
+            enrollment_id: { toString: () => 'enr-1' },
+            email_template_version_id: { toString: () => 'ver-1' },
+          }),
+        );
+        (Lead.findById as jest.Mock).mockReturnValue(lean({ org_id: { toString: () => 'org-1' } }));
+
+        await pollMailbox('aeonsign.com', 'sales@aeonsign.com', provider);
+
+        expect(LeadActivity.create).toHaveBeenCalledWith(
+          expect.objectContaining({ email_template_version_id: 'ver-1' }),
+        );
+        expect(recordDeliverabilityEvent).toHaveBeenCalledWith('aeonsign.com', 'sales@aeonsign.com', 'org-1', 'replied', {
+          leadId: 'lead-1',
+          enrollmentId: 'enr-1',
+          emailTemplateVersionId: 'ver-1',
+        });
       });
 
       it('falls back to correlating by the sender address when there is no thread match', async () => {
