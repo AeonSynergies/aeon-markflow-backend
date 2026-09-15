@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { getOrgAccessForUser, canAccessOrg } from '../services/orgAccess.service';
-import type { App } from '../constants/access';
+import type { App, Role } from '../constants/access';
 
 const MARKFLOW: App = 'markflow';
 
@@ -33,6 +33,26 @@ export function requireOrgAccess(getOrgId: (req: Request) => string | undefined)
     const orgId = getOrgId(req);
     if (!orgId || !canAccessOrg(req.orgAccess, orgId)) {
       res.status(403).json({ error: 'Not authorized for this organization' });
+      return;
+    }
+    next();
+  };
+}
+
+/**
+ * Route guard restricting an action to specific roles (e.g. workflow build/run access is
+ * everyone except BD-Lead Gen, per the RBAC table). Must run after attachOrgScope.
+ */
+export function requireRole(allowedRoles: Role[]) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!req.orgAccess) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const hasRole = req.orgAccess.roles.some((role) => allowedRoles.includes(role));
+    if (!hasRole) {
+      res.status(403).json({ error: 'Not authorized for this action' });
       return;
     }
     next();
