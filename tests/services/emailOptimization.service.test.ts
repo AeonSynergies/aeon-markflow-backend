@@ -10,6 +10,7 @@ jest.mock('../../src/models/ReviewTask.model', () => ({
 jest.mock('../../src/services/abTesting.service', () => ({ createVariantTemplate: jest.fn() }));
 jest.mock('../../src/services/emailGeneration.service', () => ({ generateEmailDraft: jest.fn() }));
 jest.mock('../../src/services/emailPerformanceAnalysis.service', () => ({ diagnoseVersion: jest.fn() }));
+jest.mock('../../src/services/internalNotification.service', () => ({ sendInternalNotification: jest.fn() }));
 
 import { EmailTemplate } from '../../src/models/EmailTemplate.model';
 import { EmailTemplateVersion } from '../../src/models/EmailTemplateVersion.model';
@@ -23,6 +24,7 @@ import {
 } from '../../src/services/emailOptimization.service';
 import { diagnoseVersion } from '../../src/services/emailPerformanceAnalysis.service';
 import type { SymptomDiagnosis } from '../../src/services/emailPerformanceAnalysis.service';
+import { sendInternalNotification } from '../../src/services/internalNotification.service';
 
 function metrics(overrides: Record<string, unknown> = {}) {
   return {
@@ -144,6 +146,9 @@ describe('emailOptimization.service', () => {
         status: 'OPEN',
         rejection_reason: diagnosis.reason,
       });
+      expect(sendInternalNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ subject: expect.stringContaining('Deliverability issue') }),
+      );
     });
 
     it('does nothing when an OPEN flag already exists for this version', async () => {
@@ -153,6 +158,7 @@ describe('emailOptimization.service', () => {
 
       expect(result).toBeNull();
       expect(ReviewTask.create).not.toHaveBeenCalled();
+      expect(sendInternalNotification).not.toHaveBeenCalled();
     });
   });
 

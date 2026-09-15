@@ -19,6 +19,7 @@ import { DomainGuardrailState } from '../models/DomainGuardrailState.model';
 import { DomainSendEvent } from '../models/DomainSendEvent.model';
 import { ReviewTask } from '../models/ReviewTask.model';
 import { UnauthorizedApproverRoleError } from './emailTemplateVersion.service';
+import { sendInternalNotification } from './internalNotification.service';
 
 export interface GuardrailDecision {
   allowed: boolean;
@@ -171,6 +172,14 @@ export async function pauseDomain(domain: string, mailbox: string, orgId: string
     },
     { upsert: true },
   );
+
+  await sendInternalNotification({
+    subject: `[MarkFlow] Domain paused: ${domain}`,
+    html:
+      `<p>SendGuardrail paused sending domain <strong>${domain}</strong> (mailbox ${mailbox}).</p>` +
+      `<p>Reason: ${reason}</p>` +
+      `<p>A ReviewTask (id ${reviewTask._id}) is open — resuming the domain requires a template-approver role.</p>`,
+  });
 }
 
 /**

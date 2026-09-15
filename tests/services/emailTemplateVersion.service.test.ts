@@ -8,11 +8,13 @@ jest.mock('../../src/models/ReviewTask.model', () => ({
   ReviewTask: { create: jest.fn(), findOneAndUpdate: jest.fn() },
 }));
 jest.mock('../../src/services/emailGeneration.service', () => ({ generateEmailDraft: jest.fn() }));
+jest.mock('../../src/services/internalNotification.service', () => ({ sendInternalNotification: jest.fn() }));
 
 import { EmailTemplate } from '../../src/models/EmailTemplate.model';
 import { EmailTemplateVersion } from '../../src/models/EmailTemplateVersion.model';
 import { ReviewTask } from '../../src/models/ReviewTask.model';
 import { generateEmailDraft } from '../../src/services/emailGeneration.service';
+import { sendInternalNotification } from '../../src/services/internalNotification.service';
 import {
   InvalidTemplateVersionTransitionError,
   UnauthorizedApproverRoleError,
@@ -95,6 +97,9 @@ describe('emailTemplateVersion.service', () => {
         email_template_version_id: 'ver-1',
         requested_by: 'user-1',
       });
+      expect(sendInternalNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ subject: expect.stringContaining('pending review') }),
+      );
     });
 
     it('also allows RESUBMITTED to move to PENDING_APPROVAL', async () => {
