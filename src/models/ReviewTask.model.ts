@@ -22,6 +22,15 @@ const reviewTaskSchema = new Schema(
       trim: true,
       required: requiredWhenKindIs('domain_guardrail', 'domain is required when kind is domain_guardrail'),
     },
+    // Set by send-time optimization's ai_suggested path (Phase 7) — see sendTimeOptimization.service.ts.
+    send_time_recommendation_id: {
+      type: Schema.Types.ObjectId,
+      ref: 'SendTimeRecommendation',
+      required: requiredWhenKindIs(
+        'send_time_recommendation',
+        'send_time_recommendation_id is required when kind is send_time_recommendation',
+      ),
+    },
     status: { type: String, enum: REVIEW_TASK_STATUSES, default: 'OPEN', required: true },
     requested_by: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     reviewed_by: { type: Schema.Types.ObjectId, ref: 'User', default: null },

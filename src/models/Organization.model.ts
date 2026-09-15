@@ -1,5 +1,6 @@
 import { Schema, model, type InferSchemaType, type Types } from 'mongoose';
 import { SENDING_DOMAIN_PURPOSES } from '../constants/organization';
+import { SEND_TIME_STRATEGIES } from '../constants/sendTimeOptimization';
 
 // Each org uses subdomains by purpose rather than one flat domain — e.g. for Aeon Synergies:
 // aeonsynergies.com is transactional, mail.aeonsynergies.com is marketing. DomainRouter picks a
@@ -29,6 +30,14 @@ const organizationSchema = new Schema(
     // marketing for another, though in practice a domain's purpose is usually fixed by whoever
     // owns its DKIM/reputation.
     sending_domains: { type: [sendingDomainSchema], default: [] },
+    // Phase 7: governs whether workflow email sends respect a send-time recommendation at all
+    // (manual — send whenever the step is reached, today's only behavior), require a human to
+    // approve one first (ai_suggested), or apply one automatically once it clears the
+    // minimum-sample-size bar (ai_automatic). Org-level, not per-WorkflowTemplate, since
+    // SendTimePerformance/SendTimeRecommendation are themselves rolled up per (org, workflow_type,
+    // persona) — one org-wide setting avoids ambiguity when several templates share a
+    // workflow_type. See sendTimeOptimization.service.ts.
+    send_time_strategy: { type: String, enum: SEND_TIME_STRATEGIES, default: 'manual' },
   },
   { timestamps: true },
 );

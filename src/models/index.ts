@@ -16,3 +16,5 @@ export { DomainSendEvent } from './DomainSendEvent.model';
 export { DomainGuardrailState } from './DomainGuardrailState.model';
 export { MailboxPollCursor } from './MailboxPollCursor.model';
 export { EmailEngagement } from './EmailEngagement.model';
+export { SendTimePerformance } from './SendTimePerformance.model';
+export { SendTimeRecommendation } from './SendTimeRecommendation.model';

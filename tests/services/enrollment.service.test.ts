@@ -1,4 +1,5 @@
 jest.mock('../../src/models/Enrollment.model', () => ({ Enrollment: { create: jest.fn() } }));
+jest.mock('../../src/models/Organization.model', () => ({ Organization: { findById: jest.fn() } }));
 jest.mock('../../src/models/SavedList.model', () => ({ SavedList: { findById: jest.fn() } }));
 jest.mock('../../src/queues/enrollmentQueue', () => ({ enqueueStepJob: jest.fn() }));
 jest.mock('../../src/services/workflowTemplate.service', () => ({
@@ -7,11 +8,13 @@ jest.mock('../../src/services/workflowTemplate.service', () => ({
 }));
 
 import { Enrollment } from '../../src/models/Enrollment.model';
+import { Organization } from '../../src/models/Organization.model';
 import { SavedList } from '../../src/models/SavedList.model';
 import { enqueueStepJob } from '../../src/queues/enrollmentQueue';
 import {
   CrossOrgReferenceError,
   EmptyWorkflowTemplateError,
+  OrganizationNotFoundError,
   SavedListNotFoundError,
   enrollSavedList,
 } from '../../src/services/enrollment.service';
@@ -26,7 +29,14 @@ function mockTemplate(overrides: Record<string, unknown> = {}) {
   });
 }
 
+function mockOrg(overrides: Record<string, unknown> = {}) {
+  (Organization.findById as jest.Mock).mockReturnValue({
+    lean: jest.fn().mockResolvedValue({ _id: { toString: () => 'org-1' }, send_time_strategy: 'manual', ...overrides }),
+  });
+}
+
 describe('enrollment.service enrollSavedList', () => {
+  beforeEach(() => mockOrg());
   afterEach(() => jest.clearAllMocks());
 
   it('throws EmptyWorkflowTemplateError when the template has no steps', async () => {
@@ -68,6 +78,8 @@ describe('enrollment.service enrollSavedList', () => {
       workflow_template_id: { toString: expect.any(Function) },
       steps: [{ kind: 'wait', wait_amount: 1, wait_unit: 'days' }],
       requires_warmup: false,
+      workflow_type: null,
+      send_time_strategy: 'manual',
       current_step_index: 0,
       status: 'active',
     });
@@ -86,6 +98,32 @@ describe('enrollment.service enrollSavedList', () => {
     await enrollSavedList('tpl-1', 'list-1');
 
     expect(Enrollment.create).toHaveBeenCalledWith(expect.objectContaining({ requires_warmup: true }));
+  });
+
+  it('snapshots workflow_type from the template and send_time_strategy from the org onto each enrollment', async () => {
+    mockTemplate({ workflow_type: 'cold_outreach' });
+    mockOrg({ send_time_strategy: 'ai_suggested' });
+    (SavedList.findById as jest.Mock).mockReturnValue({
+      lean: jest.fn().mockResolvedValue({ org_id: { toString: () => 'org-1' }, lead_ids: ['lead-1'] }),
+    });
+    (Enrollment.create as jest.Mock).mockResolvedValueOnce({ _id: { toString: () => 'enr-1' } });
+
+    await enrollSavedList('tpl-1', 'list-1');
+
+    expect(Enrollment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ workflow_type: 'cold_outreach', send_time_strategy: 'ai_suggested' }),
+    );
+  });
+
+  it('throws OrganizationNotFoundError when the template references a missing org', async () => {
+    mockTemplate();
+    (Organization.findById as jest.Mock).mockReturnValue({ lean: jest.fn().mockResolvedValue(null) });
+    (SavedList.findById as jest.Mock).mockReturnValue({
+      lean: jest.fn().mockResolvedValue({ org_id: { toString: () => 'org-1' }, lead_ids: ['lead-1'] }),
+    });
+
+    await expect(enrollSavedList('tpl-1', 'list-1')).rejects.toThrow(OrganizationNotFoundError);
+    expect(Enrollment.create).not.toHaveBeenCalled();
   });
 
   it('skips a lead that already has an active enrollment (duplicate key) without failing the batch', async () => {

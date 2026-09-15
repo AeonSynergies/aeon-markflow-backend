@@ -58,4 +58,34 @@ describe('Organization model', () => {
     const err = doc.validateSync();
     expect(err?.errors['sending_domains.0.purpose']).toBeDefined();
   });
+
+  it('defaults send_time_strategy to manual', () => {
+    const doc = new Organization({ name: 'Aeon Miles', product_context: AEON_MILES_PRODUCT_CONTEXT });
+    expect(doc.send_time_strategy).toBe('manual');
+  });
+
+  it('accepts ai_suggested and ai_automatic send_time_strategy values', () => {
+    const suggested = new Organization({
+      name: 'Aeon Miles',
+      product_context: AEON_MILES_PRODUCT_CONTEXT,
+      send_time_strategy: 'ai_suggested',
+    });
+    expect(suggested.validateSync()).toBeUndefined();
+
+    const automatic = new Organization({
+      name: 'Aeon Sign',
+      product_context: AEON_MILES_PRODUCT_CONTEXT,
+      send_time_strategy: 'ai_automatic',
+    });
+    expect(automatic.validateSync()).toBeUndefined();
+  });
+
+  it('rejects an unknown send_time_strategy', () => {
+    const doc = new Organization({
+      name: 'Aeon Miles',
+      product_context: AEON_MILES_PRODUCT_CONTEXT,
+      send_time_strategy: 'fully_autonomous',
+    });
+    expect(doc.validateSync()?.errors.send_time_strategy).toBeDefined();
+  });
 });

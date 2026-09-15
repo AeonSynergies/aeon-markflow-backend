@@ -24,6 +24,7 @@ describe('workflowTemplate.service', () => {
         org_id: 'org-1',
         name: 'Cadence',
         requires_warmup: false,
+        workflow_type: null,
         steps: [],
       });
     });
@@ -32,6 +33,12 @@ describe('workflowTemplate.service', () => {
       (WorkflowTemplate.create as jest.Mock).mockResolvedValue({ _id: 'tpl-1' });
       await createWorkflowTemplate('org-1', { name: 'Cadence', requires_warmup: true, steps: [] });
       expect(WorkflowTemplate.create).toHaveBeenCalledWith(expect.objectContaining({ requires_warmup: true }));
+    });
+
+    it('respects an explicit workflow_type', async () => {
+      (WorkflowTemplate.create as jest.Mock).mockResolvedValue({ _id: 'tpl-1' });
+      await createWorkflowTemplate('org-1', { name: 'Cadence', workflow_type: 'cold_outreach', steps: [] });
+      expect(WorkflowTemplate.create).toHaveBeenCalledWith(expect.objectContaining({ workflow_type: 'cold_outreach' }));
     });
   });
 
@@ -71,6 +78,19 @@ describe('workflowTemplate.service', () => {
       await expect(updateWorkflowTemplate('missing', { name: 'x' })).rejects.toThrow(
         WorkflowTemplateNotFoundError,
       );
+    });
+
+    it('applies an updated workflow_type', async () => {
+      const doc: Record<string, unknown> = {
+        workflow_type: 'old_type',
+        set: jest.fn(),
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      (WorkflowTemplate.findById as jest.Mock).mockResolvedValue(doc);
+
+      const result = await updateWorkflowTemplate('tpl-1', { workflow_type: 'win_back' });
+
+      expect(result.workflow_type).toBe('win_back');
     });
   });
 

@@ -1,5 +1,6 @@
 import { Schema, model, type InferSchemaType, type Types } from 'mongoose';
 import { ENROLLMENT_STATUSES } from '../constants/workflow';
+import { SEND_TIME_STRATEGIES } from '../constants/sendTimeOptimization';
 import { workflowStepSchema } from './schemas/workflowStep.schema';
 
 const enrollmentSchema = new Schema(
@@ -15,6 +16,13 @@ const enrollmentSchema = new Schema(
     // at enrollment time so toggling a template's warmup flag never silently changes behavior
     // for a lead already mid-sequence.
     requires_warmup: { type: Boolean, default: false },
+    // Both snapshotted at enrollment time for the same reason as requires_warmup — from the
+    // template (workflow_type) and the org (send_time_strategy) respectively, so a lead's own
+    // enrollment behavior can never change just because someone edited the template's category
+    // or toggled the org's send-time optimization setting mid-sequence. See
+    // sendTimeOptimization.service.ts / enrollmentProcessor.ts.
+    workflow_type: { type: String, trim: true, default: null },
+    send_time_strategy: { type: String, enum: SEND_TIME_STRATEGIES, default: 'manual' },
     current_step_index: { type: Number, default: 0, min: 0 },
     status: { type: String, enum: ENROLLMENT_STATUSES, default: 'active', required: true },
     started_at: { type: Date, default: () => new Date() },

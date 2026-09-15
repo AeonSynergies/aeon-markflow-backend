@@ -74,4 +74,23 @@ describe('ReviewTask model', () => {
     });
     expect(doc.validateSync()).toBeUndefined();
   });
+
+  it('requires send_time_recommendation_id (not email_template_version_id) when kind is send_time_recommendation', () => {
+    const doc = new ReviewTask({
+      org_id: new Types.ObjectId(),
+      kind: 'send_time_recommendation',
+    });
+    const err = doc.validateSync();
+    expect(err?.errors.send_time_recommendation_id).toBeDefined();
+    expect(err?.errors.email_template_version_id).toBeUndefined();
+  });
+
+  it('validates a send_time_recommendation review task with a recommendation set', () => {
+    const doc = new ReviewTask({
+      org_id: new Types.ObjectId(),
+      kind: 'send_time_recommendation',
+      send_time_recommendation_id: new Types.ObjectId(),
+    });
+    expect(doc.validateSync()).toBeUndefined();
+  });
 });

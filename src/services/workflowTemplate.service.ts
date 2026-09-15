@@ -11,6 +11,7 @@ export class WorkflowTemplateNotFoundError extends Error {
 export interface WorkflowTemplateInput {
   name: string;
   requires_warmup?: boolean;
+  workflow_type?: string;
   steps: WorkflowStepInput[];
 }
 
@@ -22,6 +23,7 @@ export async function createWorkflowTemplate(
     org_id: orgId,
     name: input.name,
     requires_warmup: input.requires_warmup ?? false,
+    workflow_type: input.workflow_type ?? null,
     steps: input.steps,
   });
 }
@@ -40,6 +42,7 @@ export async function updateWorkflowTemplate(
 
   if (updates.name !== undefined) template.name = updates.name;
   if (updates.requires_warmup !== undefined) template.requires_warmup = updates.requires_warmup;
+  if (updates.workflow_type !== undefined) template.workflow_type = updates.workflow_type;
   if (updates.steps !== undefined) template.set('steps', updates.steps);
 
   await template.save();

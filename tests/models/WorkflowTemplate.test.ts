@@ -9,11 +9,22 @@ describe('WorkflowTemplate model', () => {
     expect(err?.errors.name).toBeDefined();
   });
 
-  it('defaults requires_warmup to false and steps to empty', () => {
+  it('defaults requires_warmup to false, workflow_type to null, and steps to empty', () => {
     const doc = new WorkflowTemplate({ org_id: new Types.ObjectId(), name: 'Cold open sequence' });
     expect(doc.validateSync()).toBeUndefined();
     expect(doc.requires_warmup).toBe(false);
+    expect(doc.workflow_type).toBeNull();
     expect(doc.steps).toEqual([]);
+  });
+
+  it('accepts an explicit workflow_type', () => {
+    const doc = new WorkflowTemplate({
+      org_id: new Types.ObjectId(),
+      name: 'Cold open sequence',
+      workflow_type: 'cold_outreach',
+    });
+    expect(doc.validateSync()).toBeUndefined();
+    expect(doc.workflow_type).toBe('cold_outreach');
   });
 
   it('rejects an email step missing email_template_version_id or sending_domain', () => {

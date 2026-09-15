@@ -1,10 +1,12 @@
 jest.mock('../../src/models/Enrollment.model', () => ({ Enrollment: { findById: jest.fn() } }));
+jest.mock('../../src/models/EmailTemplate.model', () => ({ EmailTemplate: { findById: jest.fn() } }));
 jest.mock('../../src/models/EmailTemplateVersion.model', () => ({ EmailTemplateVersion: { findById: jest.fn() } }));
 jest.mock('../../src/models/Lead.model', () => ({ Lead: { findById: jest.fn() } }));
 jest.mock('../../src/models/Contact.model', () => ({ Contact: { findById: jest.fn() } }));
 jest.mock('../../src/models/Organization.model', () => ({ Organization: { findById: jest.fn() } }));
 jest.mock('../../src/models/LeadActivity.model', () => ({ LeadActivity: { create: jest.fn() } }));
 jest.mock('../../src/services/domainRouter.service', () => ({ resolveSendingRoute: jest.fn() }));
+jest.mock('../../src/services/sendTimeOptimization.service', () => ({ getActiveSendTimeRecommendation: jest.fn() }));
 jest.mock('../../src/services/linkTracking.service', () => ({
   rewriteLinksForTracking: jest.fn(),
   insertOpenTrackingPixel: jest.fn(),
@@ -14,20 +16,23 @@ jest.mock('../../src/services/sendGuardrail.service', () => ({ canSend: jest.fn(
 jest.mock('../../src/queues/enrollmentQueue', () => ({
   enqueueStepJob: jest.fn(),
   enqueueGuardrailRetryJob: jest.fn(),
+  enqueueSendTimeRetryJob: jest.fn(),
 }));
 
 import { Contact } from '../../src/models/Contact.model';
+import { EmailTemplate } from '../../src/models/EmailTemplate.model';
 import { EmailTemplateVersion } from '../../src/models/EmailTemplateVersion.model';
 import { Enrollment } from '../../src/models/Enrollment.model';
 import { Lead } from '../../src/models/Lead.model';
 import { LeadActivity } from '../../src/models/LeadActivity.model';
 import { Organization } from '../../src/models/Organization.model';
-import { enqueueGuardrailRetryJob, enqueueStepJob } from '../../src/queues/enrollmentQueue';
+import { enqueueGuardrailRetryJob, enqueueSendTimeRetryJob, enqueueStepJob } from '../../src/queues/enrollmentQueue';
 import { EnrollmentStepError, processEnrollmentStepJob } from '../../src/queues/enrollmentProcessor';
 import { resolveSendingRoute } from '../../src/services/domainRouter.service';
 import { createEngagementRecord } from '../../src/services/emailEngagement.service';
 import { insertOpenTrackingPixel, rewriteLinksForTracking } from '../../src/services/linkTracking.service';
 import { canSend, recordSend } from '../../src/services/sendGuardrail.service';
+import { getActiveSendTimeRecommendation } from '../../src/services/sendTimeOptimization.service';
 
 function lean(value: unknown) {
   return { lean: jest.fn().mockResolvedValue(value) };
@@ -40,6 +45,7 @@ function mockEnrollment(overrides: Record<string, unknown> = {}) {
     current_step_index: 0,
     status: 'active',
     steps: [],
+    send_time_strategy: 'manual',
     save: jest.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -138,15 +144,23 @@ describe('processEnrollmentStepJob', () => {
   describe('email step', () => {
     function mockEmailPipeline() {
       (EmailTemplateVersion.findById as jest.Mock).mockReturnValue(
-        lean({ _id: { toString: () => 'ver-1' }, status: 'APPROVED', subject_line: 'Hi', body_html: '<p>hi <a href="https://x.com">link</a></p>' }),
+        lean({
+          _id: { toString: () => 'ver-1' },
+          email_template_id: 'tpl-1',
+          status: 'APPROVED',
+          subject_line: 'Hi',
+          body_html: '<p>hi <a href="https://x.com">link</a></p>',
+        }),
       );
+      (EmailTemplate.findById as jest.Mock).mockReturnValue(lean({ persona: null }));
       (Lead.findById as jest.Mock).mockReturnValue(
         lean({ contact_id: 'contact-1', org_id: { toString: () => 'org-1' } }),
       );
-      (Contact.findById as jest.Mock).mockReturnValue(lean({ email: 'lead@example.com' }));
+      (Contact.findById as jest.Mock).mockReturnValue(lean({ email: 'lead@example.com', timezone: null }));
       (Organization.findById as jest.Mock).mockReturnValue(
         lean({ _id: 'org-1', sending_domains: [{ domain: 'aeonsign.com', purpose: 'marketing' }] }),
       );
+      (getActiveSendTimeRecommendation as jest.Mock).mockResolvedValue(null);
       (rewriteLinksForTracking as jest.Mock).mockResolvedValue('<p>hi <a href="https://track/r/tok">link</a></p>');
       (createEngagementRecord as jest.Mock).mockResolvedValue({ _id: { toString: () => 'engagement-1' } });
       (insertOpenTrackingPixel as jest.Mock).mockReturnValue(
@@ -198,6 +212,9 @@ describe('processEnrollmentStepJob', () => {
           emailTemplateVersionId: 'ver-1',
           enrollmentId: 'enr-1',
           workflowStepIndex: 0,
+          timezoneBucket: 'UTC',
+          dayOfWeek: expect.any(Number),
+          hourBucket: expect.any(Number),
         }),
       );
       expect(insertOpenTrackingPixel).toHaveBeenCalledWith(
@@ -269,6 +286,98 @@ describe('processEnrollmentStepJob', () => {
       expect(doc.current_step_index).toBe(0);
       expect(enqueueStepJob).not.toHaveBeenCalled();
       expect(enqueueGuardrailRetryJob).toHaveBeenCalledWith('enr-1', 0, expect.any(Number));
+    });
+
+    describe('send-time optimization deferral', () => {
+      afterEach(() => jest.useRealTimers());
+
+      it('sends immediately when a non-manual strategy has an active recommendation and now is in-window', async () => {
+        const { send } = mockEmailPipeline();
+        jest.useFakeTimers().setSystemTime(new Date('2026-01-07T15:00:00Z')); // Wednesday, 15:00 UTC
+        (getActiveSendTimeRecommendation as jest.Mock).mockResolvedValue({
+          day_of_week: 3,
+          hour_bucket: 15,
+          timezone_bucket: 'UTC',
+          content_variant_id: 'ver-1',
+        });
+        mockEnrollment({
+          current_step_index: 0,
+          send_time_strategy: 'ai_suggested',
+          steps: [{ kind: 'email', email_template_version_id: 'ver-1', sending_domain: 'aeonsign.com' }],
+        });
+
+        await processEnrollmentStepJob('enr-1');
+
+        expect(send).toHaveBeenCalled();
+        expect(enqueueSendTimeRetryJob).not.toHaveBeenCalled();
+      });
+
+      it('defers to the next matching window when now is outside an active recommendation', async () => {
+        const { send } = mockEmailPipeline();
+        jest.useFakeTimers().setSystemTime(new Date('2026-01-07T15:00:00Z')); // Wednesday, 15:00 UTC
+        (getActiveSendTimeRecommendation as jest.Mock).mockResolvedValue({
+          day_of_week: 3,
+          hour_bucket: 9,
+          timezone_bucket: 'UTC',
+          content_variant_id: 'ver-1',
+        });
+        const doc = mockEnrollment({
+          current_step_index: 0,
+          send_time_strategy: 'ai_automatic',
+          steps: [
+            { kind: 'email', email_template_version_id: 'ver-1', sending_domain: 'aeonsign.com' },
+            { kind: 'wait', wait_amount: 1, wait_unit: 'days' },
+          ],
+        });
+
+        await processEnrollmentStepJob('enr-1');
+
+        expect(send).not.toHaveBeenCalled();
+        expect(canSend).not.toHaveBeenCalled();
+        expect(doc.save).not.toHaveBeenCalled();
+        expect(doc.current_step_index).toBe(0);
+        expect(enqueueStepJob).not.toHaveBeenCalled();
+        expect(enqueueGuardrailRetryJob).not.toHaveBeenCalled();
+        expect(enqueueSendTimeRetryJob).toHaveBeenCalledWith('enr-1', 0, expect.any(Number));
+        const [, , delayMs] = (enqueueSendTimeRetryJob as jest.Mock).mock.calls[0];
+        expect(delayMs).toBeGreaterThan(0);
+      });
+
+      it('falls through to sending now when the recipient is outside the recommendation\'s own timezone bucket', async () => {
+        const { send } = mockEmailPipeline();
+        jest.useFakeTimers().setSystemTime(new Date('2026-01-07T15:00:00Z'));
+        (getActiveSendTimeRecommendation as jest.Mock).mockResolvedValue({
+          day_of_week: 0,
+          hour_bucket: 0,
+          timezone_bucket: 'America/New_York',
+          content_variant_id: 'ver-1',
+        });
+        mockEnrollment({
+          current_step_index: 0,
+          send_time_strategy: 'ai_suggested',
+          steps: [{ kind: 'email', email_template_version_id: 'ver-1', sending_domain: 'aeonsign.com' }],
+        });
+
+        await processEnrollmentStepJob('enr-1');
+
+        expect(send).toHaveBeenCalled();
+        expect(enqueueSendTimeRetryJob).not.toHaveBeenCalled();
+      });
+
+      it('sends immediately under a non-manual strategy when there is no active recommendation yet', async () => {
+        const { send } = mockEmailPipeline();
+        (getActiveSendTimeRecommendation as jest.Mock).mockResolvedValue(null);
+        mockEnrollment({
+          current_step_index: 0,
+          send_time_strategy: 'ai_automatic',
+          steps: [{ kind: 'email', email_template_version_id: 'ver-1', sending_domain: 'aeonsign.com' }],
+        });
+
+        await processEnrollmentStepJob('enr-1');
+
+        expect(send).toHaveBeenCalled();
+        expect(enqueueSendTimeRetryJob).not.toHaveBeenCalled();
+      });
     });
 
     it('refuses to send a version that is not APPROVED', async () => {

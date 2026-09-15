@@ -26,8 +26,9 @@ MarkFlow owns everything **before** a deal is priced: Leads, the marketing/engag
 ## Core entities (Mongoose-shaped)
 
 ```
-Contact        — shared across orgs: email, phone, firmographics (dsp_code, drivers, vans, stations),
-                 global_do_not_contact (hard suppress override)
+Contact        — shared across orgs: email, phone, timezone (IANA name, nullable — send-time
+                 optimization resolves to this, never the server's own timezone), firmographics
+                 (dsp_code, drivers, vans, stations), global_do_not_contact (hard suppress override)
 Lead           — one per (Contact, Organization): status enum (NEW-COLD, NEW-INBOUND, CONTACTED,
                  CONTACTED-PHONE, CONTACTED-EMAIL, PROSPECT, INACTIVE, RECLAIMED), email_deliverability
                  (GOOD/LOW/BAD), phone_dnd_status, org_id, recycled_from_deal_id, lost_reason, lost_stage,
@@ -37,18 +38,27 @@ Organization   — name, enabled_features[], product_context, brand_voice_guidel
                  sending_domains[] { domain, purpose: "marketing" | "transactional" | "alerts" }
                  (an org can have multiple sending domains, each tagged with its own purpose — Aeon
                  Miles sometimes sends from the Aeon Synergies domain — never assume 1:1 org-to-domain
-                 or one purpose per org)
-WorkflowTemplate — org-scoped, requires_warmup flag, steps[] (email | call_task | sms | wait)
-Enrollment     — Lead × WorkflowTemplate instance: current step, status (active/paused/completed/exited)
+                 or one purpose per org), send_time_strategy ("manual" | "ai_suggested" | "ai_automatic",
+                 default "manual" — org-level, not per-template; see Phase 7 below)
+WorkflowTemplate — org-scoped, requires_warmup flag, workflow_type (free-text category, e.g.
+                 "cold_outreach" — rolls up send-time performance across templates of the same type),
+                 steps[] (email | call_task | sms | wait)
+Enrollment     — Lead × WorkflowTemplate instance: current step, status (active/paused/completed/exited);
+                 snapshots workflow_type (from the template) and send_time_strategy (from the org) at
+                 enrollment time, same "never latest" reasoning as requires_warmup
 EmailTemplate  — org-scoped, ab_group_id, current_version_id
 EmailTemplateVersion — subject_line, body_html, image_blocks[], image_policy (always/never/auto),
                  generation_source (ai/human/ai_edited_by_human), ai_draft_snapshot,
                  status (DRAFT → PENDING_APPROVAL → APPROVED | REJECTED → RESUBMITTED),
                  ai_generation_metadata { reference_templates[], reason }
-ReviewTask     — auto-created when a template/workflow change needs human approval
+ReviewTask     — auto-created when a template/workflow change (or a send-time recommendation, Phase 7)
+                 needs human approval
 LeadActivity   — kind: email | call | sms | meeting | task | note; links lead_id, workflow enrollment + step
 SendTimePerformance — rollup: org_id, workflow_type, persona, day_of_week, hour_bucket, timezone_bucket,
                  content_variant_id, sent_count, reply_rate, meeting_rate, sample_size
+SendTimeRecommendation — a proposed or applied (day_of_week, hour_bucket, timezone_bucket,
+                 content_variant_id) pairing for one (org, workflow_type, persona) group; status
+                 OPEN → APPROVED | REJECTED, or APPROVED → SUPERSEDED when a better one replaces it
 UserAccessGrant — { user_id, app: "markflow"|"onboard", org_id (null = all orgs), role, features[] }
 ```
 
@@ -80,6 +90,28 @@ Bounce/reply signals are fully live. Spam-complaint signal is only partial (Yaho
 Recipients default to the mailbox itself (a shared inbox a team monitors together) — override with `INTERNAL_NOTIFICATIONS_RECIPIENTS` (comma-separated) to route to specific addresses instead. A failed send (missing config, mailbox not yet provisioned, transient Graph error) is logged and swallowed, never thrown — the triggering `ReviewTask`/`DomainGuardrailState` row is the real source of truth and is already persisted by the time the notification fires.
 
 ⚠️ **Manual step before relying on this in production**: confirm the `notifications@aeonsynergies.com` shared mailbox actually exists in the Aeon Synergies M365 tenant, and that the existing Graph app registration's Mail.Send permission covers it (if an Exchange Application Access Policy scopes that app to specific mailboxes, add this one). Not something this codebase can verify or provision itself — an ops task. Until confirmed, sends fail silently (logged, not thrown) rather than blocking the ReviewTask/pause they're attached to.
+
+## Go-live status: send-time/content-pattern optimization (Phase 7)
+
+✅ **Built.** `sendTimePerformance.service.ts`'s `computeSendTimeRollups()` recomputes every `SendTimePerformance` bucket on a rolling basis (last `SEND_TIME_ROLLUP_LOOKBACK_DAYS`, not all-time) from `EmailEngagement` rows — each send is bucketed by the **recipient's own local** day-of-week/hour (via `Contact.timezone`, falling back to UTC when unknown — never the server's timezone; see `src/utils/timezone.ts`). Target metric is reply rate / meeting-booked, same as everywhere else — **never open rate**. `sendTimeOptimization.service.ts`'s `runSendTimeOptimization()` (scheduled daily by `sendTimePerformanceQueue.ts`/`Worker.ts`, also callable on demand) then evaluates every (org, workflow_type, persona) group belonging to an org whose `send_time_strategy` isn't `"manual"`:
+
+- **`ai_suggested`**: a better-performing (day/hour/timezone, content) combination creates a `SendTimeRecommendation` in `OPEN` status plus a `ReviewTask` (`kind: 'send_time_recommendation'`) — the same `ReviewTask`/human-approval gate as everywhere else in MarkFlow. `approveSendTimeRecommendation`/`rejectSendTimeRecommendation` (role-gated, same bar as approving an `EmailTemplateVersion`) decide it; approving supersedes whichever recommendation was previously active for that group.
+- **`ai_automatic`**: the same discovery, but the recommendation is created already `APPROVED` — no `ReviewTask`, no per-send approval, per the spec ("schedules within a validated window without per-send approval"). Still sends an internal notification either way, so a human always knows what changed even when nothing was asked of them — same precedent as SendGuardrail's autonomous domain-pause action.
+- Both paths require the same minimum-sample-size discipline as SendGuardrail/Phase 6 (see table below) before trusting any bucket, and require several qualifying buckets before picking a "best" one — comparing the only bucket ever tried against nothing isn't a comparison.
+
+**Enforcement, in `enrollmentProcessor.ts`'s `sendWorkflowEmail`**: when an enrollment's snapshotted `send_time_strategy` isn't `manual`, it looks up the active (`APPROVED`) recommendation for its (org, workflow_type, persona) group. If the recipient is in-window (their local day/hour matches, **and** their own resolved timezone matches the recommendation's `timezone_bucket` exactly — see known gap below), it sends now; otherwise it computes the delay to the next matching window (`nextOccurrenceInTimezone`) and re-enqueues via `enqueueSendTimeRetryJob` rather than sending. **SendGuardrail always has the final word**: this send-time check runs *before* `canSend()`, never instead of it — a slot send-time optimization considers optimal that SendGuardrail would still throttle/pause gets deferred by SendGuardrail's own retry delay, not overridden or re-picked by send-time logic. No active recommendation yet (or strategy is `manual`) → sends immediately, exactly like before Phase 7 existed.
+
+⚠️ **Known gap, not built**: a `SendTimeRecommendation` is computed for one specific `timezone_bucket`. A recipient whose own resolved timezone doesn't match that bucket exactly falls straight through to sending immediately (manual-equivalent) rather than being evaluated against a mismatched clock. Multi-timezone recommendations (picking the right bucket per recipient timezone, not just one bucket per group) would need real send volume across timezones to be worth building — revisit once that data exists.
+
+**Proposed numeric defaults — not yet reviewed, all in `src/constants/sendTimeOptimization.ts`:**
+
+| Constant | Default | What it gates |
+|---|---|---|
+| `MIN_SAMPLE_SIZE_FOR_SEND_TIME_BUCKET` | 30 sends | Below this, a single bucket's reply/meeting rate isn't trusted at all |
+| `MIN_CANDIDATE_BUCKETS_BEFORE_RECOMMENDING` | 3 buckets | Minimum qualifying buckets for the same (org, workflow_type, persona) before picking a "best" one |
+| `SEND_TIME_IMPROVEMENT_MARGIN` | 10% relative | How much better a new bucket's reply rate must be than the current approved one before proposing a change — avoids flapping on ordinary noise |
+| `SEND_TIME_ROLLUP_LOOKBACK_DAYS` | 90 days | How far back the rolling rollup looks each time it recomputes |
+| `SEND_TIME_ROLLUP_INTERVAL_MS` | 24 hours | How often the rollup + recommendation cycle re-runs — matches Phase 6's cadence |
 
 ## Yahoo/AOL CFL — deprioritized, not abandoned
 
