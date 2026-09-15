@@ -65,21 +65,15 @@ Bounce/reply signals are fully live. Spam-complaint signal is only partial (Yaho
 
 ## Domain purpose model — refines `Organization.sending_domains[]`
 
-Each org uses subdomains by purpose, not one flat domain per org: `mail.*` for marketing (MarkFlow's workflow engine sends), main domain for transactional (existing nodemailer system, untouched), `alert.`/`notify.*` for system alerts. `sending_domains[]` should be `{ domain, purpose: "marketing" | "transactional" | "alerts" }[]`, not a flat string array — `DomainRouter` needs to pick by purpose, not just by org. **Still unbuilt** — `sending_domains[]` remains a flat string array today. MarkFlow's own internal notifications didn't wait on this refactor; see the next section for the simpler path actually built instead.
-
-## Internal notifications (ReviewTask alerts, SendGuardrail pause notices) — built
-
-✅ **Done.** `internalNotification.service.ts`'s `sendInternalNotification()` is the one place these go through — called from `sendGuardrail.service.ts`'s `pauseDomain`, `emailTemplateVersion.service.ts`'s `submitForReview`, and `emailOptimization.service.ts`'s `flagVersionDeliverabilityIssue`. It always sends via the `microsoft_graph` provider directly (`getEmailProvider('microsoft_graph')`), from the shared mailbox configured in `INTERNAL_NOTIFICATIONS_MAILBOX` (`notifications@aeonsynergies.com`) — never through `DomainRouter`/`resolveSendingRoute` and never gated by `SendGuardrail`'s `canSend`/`pauseDomain` logic. Deliberately its own code path, not a conditional branch inside the marketing send flow: these are low-volume internal alerts, not cold-outreach sends, and must never compete with or be throttled/paused by logic sized for marketing volume.
-
-Recipients default to the mailbox itself (a shared inbox a team monitors together) — override with `INTERNAL_NOTIFICATIONS_RECIPIENTS` (comma-separated) to route to specific addresses instead. A failed send (missing config, mailbox not yet provisioned, transient Graph error) is logged and swallowed, never thrown — the triggering `ReviewTask`/`DomainGuardrailState` row is the real source of truth and is already persisted by the time the notification fires.
-
-⚠️ **Manual step before relying on this in production**: confirm the `notifications@aeonsynergies.com` shared mailbox actually exists in the Aeon Synergies M365 tenant, and that the existing Graph app registration's Mail.Send permission covers it (if an Exchange Application Access Policy scopes that app to specific mailboxes, add this one). Not something this codebase can verify or provision itself — an ops task. Until confirmed, sends fail silently (logged, not thrown) rather than blocking the ReviewTask/pause they're attached to.
+Each org uses subdomains by purpose, not one flat domain per org: `mail.*` for marketing (MarkFlow's workflow engine sends), main domain for transactional (existing nodemailer system, untouched), `alert.`/`notify.*` for system alerts. `sending_domains[]` should be `{ domain, purpose: "marketing" | "transactional" | "alerts" }[]`, not a flat string array — `DomainRouter` needs to pick by purpose, not just by org. **MarkFlow's own internal notifications** (`ReviewTask` alerts, `SendGuardrail` pause notifications) should route through the `alerts` purpose domain, not the `marketing` one — don't mix internal notification sending with cold-outreach sending reputation.
 
 ## Yahoo/AOL CFL — deprioritized, not abandoned
 
 DKIM setup continues regardless (valuable for deliverability to every provider). The Sender Hub CFL *signup* step specifically is deprioritized: it only yields complaint signal for Yahoo/AOL-hosted recipients, and very few leads use those addresses given the ICP. Revisit if the lead mix ever shifts toward more consumer webmail.
 
 
+
+## The three things that must never be violated
 
 1. **"Response rate" means reply rate / meeting-booked, never open rate**, anywhere in analytics or optimization logic. Opens are unreliable (Apple MPP, Gmail proxy caching).
 2. **Human-in-the-loop gates are real gates**: AI-generated template content and AI-suggested workflow/optimization changes sit in `DRAFT`/`PENDING_APPROVAL` until a human with the right role approves — never auto-applied. Exception: sending guardrails (domain warmup/throttling) can act autonomously — safety mechanism, not a content/strategy judgment call.
