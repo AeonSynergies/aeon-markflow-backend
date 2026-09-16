@@ -128,6 +128,74 @@ export function buildOpenApiSpec(): object {
               version_number: { type: 'integer' },
             },
           },
+          LeadResponse: {
+            type: 'object',
+            properties: {
+              _id: { type: 'string' },
+              org_id: { type: 'string' },
+              contact_id: { type: 'string' },
+              name: { type: 'string', nullable: true },
+              company: { type: 'string', nullable: true },
+              email: { type: 'string', nullable: true },
+              phone: { type: 'string', nullable: true },
+              status: {
+                type: 'string',
+                enum: [
+                  'NEW-COLD',
+                  'NEW-INBOUND',
+                  'CONTACTED',
+                  'CONTACTED-PHONE',
+                  'CONTACTED-EMAIL',
+                  'PROSPECT',
+                  'INACTIVE',
+                  'RECLAIMED',
+                ],
+              },
+              email_deliverability: { type: 'string', enum: ['GOOD', 'LOW', 'BAD'] },
+              phone_dnd_status: { type: 'boolean' },
+              lost_reason: { type: 'string', nullable: true },
+              lost_stage: { type: 'string', nullable: true },
+              recycled_from_deal_id: { type: 'string', nullable: true },
+              eligible_for_reengagement_at: { type: 'string', format: 'date-time', nullable: true },
+              createdAt: { type: 'string', format: 'date-time' },
+              updatedAt: { type: 'string', format: 'date-time' },
+            },
+          },
+          CreateSavedListRequest: {
+            type: 'object',
+            required: ['name'],
+            properties: {
+              name: { type: 'string' },
+              lead_ids: { type: 'array', items: { type: 'string' } },
+            },
+          },
+          AddLeadsToSavedListRequest: {
+            type: 'object',
+            required: ['lead_ids'],
+            properties: {
+              lead_ids: { type: 'array', items: { type: 'string' } },
+            },
+          },
+          SavedListResponse: {
+            type: 'object',
+            properties: {
+              _id: { type: 'string' },
+              org_id: { type: 'string' },
+              name: { type: 'string' },
+              lead_count: { type: 'integer' },
+              created_by: { type: 'string', nullable: true },
+              createdAt: { type: 'string', format: 'date-time' },
+              updatedAt: { type: 'string', format: 'date-time' },
+            },
+          },
+          SavedListBulkActionResponse: {
+            type: 'object',
+            properties: {
+              saved_list: { $ref: '#/components/schemas/SavedListResponse' },
+              added_count: { type: 'integer' },
+              skipped_count: { type: 'integer' },
+            },
+          },
           EmailTemplateVersionResponse: {
             type: 'object',
             properties: {

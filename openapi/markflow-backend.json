@@ -269,6 +269,159 @@
           }
         }
       },
+      "LeadResponse": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "contact_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "company": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "NEW-COLD",
+              "NEW-INBOUND",
+              "CONTACTED",
+              "CONTACTED-PHONE",
+              "CONTACTED-EMAIL",
+              "PROSPECT",
+              "INACTIVE",
+              "RECLAIMED"
+            ]
+          },
+          "email_deliverability": {
+            "type": "string",
+            "enum": [
+              "GOOD",
+              "LOW",
+              "BAD"
+            ]
+          },
+          "phone_dnd_status": {
+            "type": "boolean"
+          },
+          "lost_reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "lost_stage": {
+            "type": "string",
+            "nullable": true
+          },
+          "recycled_from_deal_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "eligible_for_reengagement_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreateSavedListRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "lead_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AddLeadsToSavedListRequest": {
+        "type": "object",
+        "required": [
+          "lead_ids"
+        ],
+        "properties": {
+          "lead_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SavedListResponse": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "lead_count": {
+            "type": "integer"
+          },
+          "created_by": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SavedListBulkActionResponse": {
+        "type": "object",
+        "properties": {
+          "saved_list": {
+            "$ref": "#/components/schemas/SavedListResponse"
+          },
+          "added_count": {
+            "type": "integer"
+          },
+          "skipped_count": {
+            "type": "integer"
+          }
+        }
+      },
       "EmailTemplateVersionResponse": {
         "type": "object",
         "properties": {
@@ -612,6 +765,206 @@
           },
           "404": {
             "description": "Template or SavedList not found"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/saved-lists": {
+      "post": {
+        "summary": "Create a SavedList, optionally seeded with a bulk lead selection",
+        "description": "The Leads screen's \"enroll selected leads into a SavedList\" bulk action, new-list path. Workflow-related, per the RBAC table — same access as building/running a workflow, not the plain Lead view/upload/monitor access BD-Lead Gen has. Any lead_ids not belonging to this org's own Lead records are dropped rather than trusted, reported via skipped_count.\n",
+        "tags": [
+          "SavedLists"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSavedListRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedListBulkActionResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List SavedLists for an org",
+        "tags": [
+          "SavedLists"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SavedListResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/saved-lists/{savedListId}/leads": {
+      "post": {
+        "summary": "Add a bulk lead selection to an existing SavedList",
+        "description": "The Leads screen's \"enroll selected leads into a SavedList\" bulk action, add-to-existing path. Deduped against the list's current membership and against lead ids that don't belong to this org's own Lead records.\n",
+        "tags": [
+          "SavedLists"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "savedListId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddLeadsToSavedListRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedListBulkActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/leads": {
+      "get": {
+        "summary": "List/filter/search Leads for an org",
+        "description": "Open to every role with org access, including BD-Lead Gen (view/upload/monitor only, per the RBAC table) — no workflow-related action happens here. `segment=recycled` narrows to the Recycled/Win-back segment (status RECLAIMED, with lost_reason/lost_stage populated) and is itself gated to BD-Sales/BD-Manager/Admin/Super Admin; any other role requesting it gets 403 rather than a silently-filtered result. `search` matches the lead's Contact name/company — since a Contact can be a Lead in more than one org, this always resolves back to *this org's own* Lead record, never another org's.\n",
+        "tags": [
+          "Leads"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "NEW-COLD",
+                "NEW-INBOUND",
+                "CONTACTED",
+                "CONTACTED-PHONE",
+                "CONTACTED-EMAIL",
+                "PROSPECT",
+                "INACTIVE",
+                "RECLAIMED"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "segment",
+            "required": false,
+            "description": "Pass \"recycled\" for the Recycled/Win-back segment (status RECLAIMED).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "recycled"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "description": "Case-insensitive substring match against the lead's Contact name/company.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LeadResponse"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "segment=recycled requested by a role outside RECYCLED_SEGMENT_ROLES"
           }
         }
       }

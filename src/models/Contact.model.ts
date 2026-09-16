@@ -16,6 +16,11 @@ const contactSchema = new Schema(
   {
     // Contacts are shared across orgs (a single person may be a lead for more than one
     // organization) — org-specific state lives on Lead, not here.
+    // Identity fields (name/company) live here rather than on Lead for the same reason: a
+    // person's name and current employer don't change per org they happen to be a lead for.
+    // Neither existed before the Leads-screen search feature needed something to search by.
+    name: { type: String, trim: true },
+    company: { type: String, trim: true },
     email: {
       type: String,
       trim: true,
