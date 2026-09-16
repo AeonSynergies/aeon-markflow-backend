@@ -123,6 +123,35 @@ export function buildOpenApiSpec(): object {
               updatedAt: { type: 'string', format: 'date-time' },
             },
           },
+          CrossOrgInsightResponse: {
+            type: 'object',
+            properties: {
+              insight_type: { type: 'string', enum: ['sequence_shape', 'step_count', 'send_time_window'] },
+              workflow_type: { type: 'string', nullable: true },
+              persona: { type: 'string', nullable: true },
+              step_kinds: { type: 'array', items: { type: 'string' } },
+              step_count: { type: 'integer' },
+              day_of_week: { type: 'integer' },
+              hour_bucket: { type: 'integer' },
+              timezone_bucket: { type: 'string' },
+              confidence: { type: 'string', enum: ['emerging', 'established'] },
+            },
+          },
+          RawCrossOrgInsightResponse: {
+            allOf: [
+              { $ref: '#/components/schemas/CrossOrgInsightResponse' },
+              {
+                type: 'object',
+                properties: {
+                  org_count: { type: 'integer' },
+                  sample_size: { type: 'integer' },
+                  avg_reply_rate: { type: 'number' },
+                  avg_meeting_rate: { type: 'number' },
+                  computed_at: { type: 'string', format: 'date-time' },
+                },
+              },
+            ],
+          },
         },
       },
     },

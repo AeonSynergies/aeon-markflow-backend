@@ -18,3 +18,5 @@ export { MailboxPollCursor } from './MailboxPollCursor.model';
 export { EmailEngagement } from './EmailEngagement.model';
 export { SendTimePerformance } from './SendTimePerformance.model';
 export { SendTimeRecommendation } from './SendTimeRecommendation.model';
+export { RecipientProviderCategory } from './RecipientProviderCategory.model';
+export { CrossOrgInsight } from './CrossOrgInsight.model';

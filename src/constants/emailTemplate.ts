@@ -21,6 +21,9 @@ export const EMAIL_TEMPLATE_VERSION_TRANSITIONS: Record<EmailTemplateVersionStat
   RESUBMITTED: ['PENDING_APPROVAL'],
 };
 
+// always/never render unconditionally at send time; auto defers to imagePolicy.service.ts's
+// resolveImageRenderDecision, which weighs the workflow step's position (a first-touch cold
+// email always strips, regardless of provider) and the recipient's provider category (Phase 8).
 export const IMAGE_POLICIES = ['always', 'never', 'auto'] as const;
 export type ImagePolicy = (typeof IMAGE_POLICIES)[number];
 

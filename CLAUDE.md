@@ -47,9 +47,10 @@ Enrollment     — Lead × WorkflowTemplate instance: current step, status (acti
                  snapshots workflow_type (from the template) and send_time_strategy (from the org) at
                  enrollment time, same "never latest" reasoning as requires_warmup
 EmailTemplate  — org-scoped, ab_group_id, current_version_id
-EmailTemplateVersion — subject_line, body_html, image_blocks[], image_policy (always/never/auto),
-                 generation_source (ai/human/ai_edited_by_human), ai_draft_snapshot,
-                 status (DRAFT → PENDING_APPROVAL → APPROVED | REJECTED → RESUBMITTED),
+EmailTemplateVersion — subject_line, body_html, image_blocks[] { block_id, alt_text, placeholder_src },
+                 image_policy (always/never/auto — "auto" is enforced at send time by
+                 imagePolicy.service.ts, Phase 8), generation_source (ai/human/ai_edited_by_human),
+                 ai_draft_snapshot, status (DRAFT → PENDING_APPROVAL → APPROVED | REJECTED → RESUBMITTED),
                  ai_generation_metadata { reference_templates[], reason }
 ReviewTask     — auto-created when a template/workflow change (or a send-time recommendation, Phase 7)
                  needs human approval
@@ -59,6 +60,11 @@ SendTimePerformance — rollup: org_id, workflow_type, persona, day_of_week, hou
 SendTimeRecommendation — a proposed or applied (day_of_week, hour_bucket, timezone_bucket,
                  content_variant_id) pairing for one (org, workflow_type, persona) group; status
                  OPEN → APPROVED | REJECTED, or APPROVED → SUPERSEDED when a better one replaces it
+RecipientProviderCategory — per-domain cache (Phase 8): consumer webmail vs. corporate/enterprise,
+                 fed by an MX lookup, used only by the "auto" image policy
+CrossOrgInsight — an abstracted structural/timing pattern (Phase 8) observed across at least
+                 MIN_ORGS_FOR_INSIGHT distinct orgs' own WorkflowTemplate/SendTimePerformance data —
+                 sequence_shape, step_count, or send_time_window; never one org's raw content
 UserAccessGrant — { user_id, app: "markflow"|"onboard", org_id (null = all orgs), role, features[] }
 ```
 
@@ -113,6 +119,37 @@ Recipients default to the mailbox itself (a shared inbox a team monitors togethe
 | `SEND_TIME_ROLLUP_LOOKBACK_DAYS` | 90 days | How far back the rolling rollup looks each time it recomputes |
 | `SEND_TIME_ROLLUP_INTERVAL_MS` | 24 hours | How often the rollup + recommendation cycle re-runs — matches Phase 6's cadence |
 
+## Go-live status: multi-org rollout — image policy + cross-org insights (Phase 8)
+
+✅ **Built.** Two independent pieces:
+
+**Image-placeholder policy.** `EmailTemplateVersion.image_policy`/`image_blocks[]` existed since Phase 3 but nothing read them at send time until now. `imagePolicy.service.ts`'s `resolveImageRenderDecision()` is called from `enrollmentProcessor.ts`'s `sendWorkflowEmail`, right before link-tracking rewrite:
+- `always`/`never` are unconditional.
+- `auto` **always strips on the first-touch step** (`workflow_step_index === 0`), regardless of the recipient — a cold first contact is the highest-risk moment for image-heavy content to read as spam. On any later touch, it renders for a `corporate` recipient and strips for a `consumer` one.
+
+Provider classification (`providerCategory.service.ts`'s `classifyDomain()`) checks a hardcoded list of well-known free webmail brands first (no DNS needed), then a long-lived `RecipientProviderCategory` cache, then falls back to an MX lookup (Node's built-in `dns/promises`, no new dependency) — cached afterward. `renderOrStripImageBlocks()` (cheerio, matching `linkTracking.service.ts`'s own HTML-manipulation convention) then removes or fills in the `<img data-block-id="...">` elements that match `image_blocks` entries; anything else in the HTML (like the open-tracking pixel, inserted later) is untouched either way.
+
+⚠️ **This whole render/strip split (consumer→strip, corporate→render, on non-first-touch) is a proposed default, not a measured fit** — flagged for review same as every other unreviewed heuristic in this codebase. The MX lookup itself mostly just confirms real mail infrastructure exists (and records `mx_hosts` for audit) rather than driving today's binary classification — see `src/constants/providerCategory.ts`'s own comment on why a more refined MX-pattern-based split isn't attempted without real deliverability data to calibrate it against.
+
+**Cross-org insight sharing.** `crossOrgInsight.service.ts`'s `computeCrossOrgInsights()` (scheduled weekly by `crossOrgInsightQueue.ts`/`Worker.ts`, also callable on demand) scans **every org's** `WorkflowTemplate` (sequence_shape: the ordered step-kind list; step_count: how many steps) and qualifying `SendTimePerformance` buckets (send_time_window, Phase 7) and groups them into abstracted patterns. The abstraction is structural, not a policy toggle: a `CrossOrgInsight` document is only ever created once a pattern is independently observed across at least `MIN_ORGS_FOR_INSIGHT` **distinct** orgs — so by construction, no insight can ever trace back to fewer orgs than that, and it never stores one org's own content or org-specific numbers, only pooled ones. `send_time_window`'s `avg_reply_rate`/`avg_meeting_rate` are sample-size-weighted across every qualifying org, never a flat per-org average.
+
+Two read routes, both new (`crossOrgInsight.routes.ts`, mounted globally — not org-scoped, since the data isn't org-specific):
+- `GET /cross-org-insights` — any workflow-access role. Returns only a coarse `confidence` label (`emerging`/`established`); deliberately omits `org_count`/`sample_size`/`avg_*_rate` so even this generic view can't be used to infer exactly how many orgs or sends back a pattern.
+- `GET /cross-org-insights/raw` — gated by a new `ADMIN_ONLY_ROLES` (`SUPER_ADMIN`/`ADMIN`) in `src/constants/access.ts`, the first role array in this codebase this restrictive. Returns every field, including the real pooled numbers.
+
+This is the "surfaced in the workflow builder" backend half — the actual visual workflow builder is frontend work in the separate `aeon-markflow` repo, same split as Phase 4's React Flow canvas.
+
+**Proposed numeric defaults — not yet reviewed, all in `src/constants/crossOrgInsight.ts` / `src/constants/providerCategory.ts`:**
+
+| Constant | Default | What it gates |
+|---|---|---|
+| `MIN_ORGS_FOR_INSIGHT` | 3 orgs | The actual abstraction mechanism — no insight can exist below this many distinct orgs |
+| `MIN_SAMPLE_SIZE_FOR_INSIGHT` | 90 sends | `send_time_window` insights only (not sequence_shape/step_count, which use org_count alone) |
+| `MIN_ORG_BUCKET_SAMPLE_SIZE` | 30 sends | A `send_time_window` insight only pulls from an org's own buckets that already clear this floor |
+| `ESTABLISHED_SAMPLE_SIZE_THRESHOLD` | 300 | Sample size at/above this is labeled "established" in the generic view; below it, "emerging" |
+| `CROSS_ORG_INSIGHT_INTERVAL_MS` | 7 days | How often the cross-org rollup recomputes — weekly, not daily, since these patterns move far slower than one org's own tuning |
+| `PROVIDER_CATEGORY_CACHE_TTL_MS` | 30 days | How long a domain's MX-derived classification is trusted before re-checking |
+
 ## Yahoo/AOL CFL — deprioritized, not abandoned
 
 DKIM setup continues regardless (valuable for deliverability to every provider). The Sender Hub CFL *signup* step specifically is deprioritized: it only yields complaint signal for Yahoo/AOL-hosted recipients, and very few leads use those addresses given the ICP. Revisit if the lead mix ever shifts toward more consumer webmail.
@@ -136,6 +173,8 @@ DKIM setup continues regardless (valuable for deliverability to every provider).
 | BD-Sales | Full workflow access (build, run) |
 
 Recycled/Win-back lead segment visible to: BD-Sales, BD-Manager, Admin only.
+
+Raw cross-org insight data (`GET /cross-org-insights/raw`, Phase 8) visible to: Super Admin, Admin only — see `ADMIN_ONLY_ROLES`. Everyone with workflow access still sees the generic, coarse-labeled recommendations at `GET /cross-org-insights`.
 
 ## Integration points and current status
 
