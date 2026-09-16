@@ -8,7 +8,7 @@ jest.mock('../../src/models/LeadActivity.model', () => ({
 jest.mock('../../src/models/MailboxPollCursor.model', () => ({
   MailboxPollCursor: { findOne: jest.fn(), findOneAndUpdate: jest.fn() },
 }));
-jest.mock('../../src/models/Organization.model', () => ({ Organization: { findOne: jest.fn() } }));
+jest.mock('../../src/models/Organization.model', () => ({ Organization: { findOne: jest.fn(), find: jest.fn() } }));
 jest.mock('../../src/services/inboundMessageClassifier', () => ({
   classifySystemMessage: jest.fn(),
   extractReferencedRecipient: jest.fn(),
@@ -64,6 +64,7 @@ describe('mailboxPoller.service', () => {
     (MailboxPollCursor.findOne as jest.Mock).mockReturnValue(lean(null));
     (MailboxPollCursor.findOneAndUpdate as jest.Mock).mockResolvedValue(undefined);
     (LeadActivity.exists as jest.Mock).mockResolvedValue(null);
+    (Organization.find as jest.Mock).mockReturnValue(lean([]));
   });
 
   describe('pollMailbox', () => {
@@ -342,6 +343,126 @@ describe('mailboxPoller.service', () => {
       expect(getEmailProvider).toHaveBeenCalledWith('google_workspace');
       expect(summaries).toHaveLength(1);
       expect(summaries[0].mailbox).toBe('sales@aeonmiles.com');
+    });
+
+    it('falls back to the deployment-map default mailbox when no org has configured any mailboxes for the domain', async () => {
+      (getDomainProviderMap as jest.Mock).mockReturnValue({
+        'aeonsign.com': { provider: 'zoho_mail', mailbox: 'sales@aeonsign.com' },
+      });
+      (Organization.find as jest.Mock).mockReturnValue(lean([]));
+      const provider = mockProvider([]);
+      (getEmailProvider as jest.Mock).mockReturnValue(provider);
+
+      const summaries = await pollAllMailboxes();
+
+      expect(Organization.find).toHaveBeenCalledWith({ 'sending_domains.domain': 'aeonsign.com' });
+      expect(summaries).toEqual([expect.objectContaining({ domain: 'aeonsign.com', mailbox: 'sales@aeonsign.com' })]);
+    });
+
+    it('polls every mailbox any org has configured for a domain, not just the deployment-map default', async () => {
+      (getDomainProviderMap as jest.Mock).mockReturnValue({
+        'aeonsynergies.com': { provider: 'microsoft_graph', mailbox: 'fallback@aeonsynergies.com' },
+      });
+      (Organization.find as jest.Mock).mockReturnValue(
+        lean([
+          {
+            sending_domains: [
+              {
+                domain: 'aeonsynergies.com',
+                purpose: 'marketing',
+                mailboxes: [
+                  { address: 'alex@aeonsynergies.com', status: 'active' },
+                  { address: 'jordan@aeonsynergies.com', status: 'active' },
+                ],
+              },
+            ],
+          },
+        ]),
+      );
+      const provider = mockProvider([]);
+      (getEmailProvider as jest.Mock).mockReturnValue(provider);
+
+      const summaries = await pollAllMailboxes();
+
+      const polledMailboxes = summaries.map((summary) => summary.mailbox);
+      expect(polledMailboxes).toEqual(
+        expect.arrayContaining(['alex@aeonsynergies.com', 'jordan@aeonsynergies.com']),
+      );
+      expect(polledMailboxes).not.toContain('fallback@aeonsynergies.com');
+      expect(summaries).toHaveLength(2);
+    });
+
+    it('unions configured mailboxes across every org that shares the same domain, deduping repeats', async () => {
+      (getDomainProviderMap as jest.Mock).mockReturnValue({
+        'aeonsynergies.com': { provider: 'microsoft_graph', mailbox: 'fallback@aeonsynergies.com' },
+      });
+      (Organization.find as jest.Mock).mockReturnValue(
+        lean([
+          {
+            sending_domains: [
+              {
+                domain: 'aeonsynergies.com',
+                purpose: 'marketing',
+                mailboxes: [{ address: 'shared@aeonsynergies.com', status: 'active' }],
+              },
+            ],
+          },
+          {
+            sending_domains: [
+              {
+                domain: 'aeonsynergies.com',
+                purpose: 'transactional',
+                mailboxes: [
+                  { address: 'shared@aeonsynergies.com', status: 'active' },
+                  { address: 'aeonmiles-desk@aeonsynergies.com', status: 'active' },
+                ],
+              },
+              // A different domain on the same org — must not leak into this domain's mailboxes.
+              { domain: 'other.com', purpose: 'marketing', mailboxes: [{ address: 'nope@other.com', status: 'active' }] },
+            ],
+          },
+        ]),
+      );
+      const provider = mockProvider([]);
+      (getEmailProvider as jest.Mock).mockReturnValue(provider);
+
+      const summaries = await pollAllMailboxes();
+
+      const polledMailboxes = summaries.map((summary) => summary.mailbox).sort();
+      expect(polledMailboxes).toEqual(['aeonmiles-desk@aeonsynergies.com', 'shared@aeonsynergies.com']);
+    });
+
+    it('continues polling a domain\'s other mailboxes when one of them fails', async () => {
+      (getDomainProviderMap as jest.Mock).mockReturnValue({
+        'aeonsynergies.com': { provider: 'microsoft_graph', mailbox: 'fallback@aeonsynergies.com' },
+      });
+      (Organization.find as jest.Mock).mockReturnValue(
+        lean([
+          {
+            sending_domains: [
+              {
+                domain: 'aeonsynergies.com',
+                purpose: 'marketing',
+                mailboxes: [
+                  { address: 'alex@aeonsynergies.com', status: 'active' },
+                  { address: 'jordan@aeonsynergies.com', status: 'active' },
+                ],
+              },
+            ],
+          },
+        ]),
+      );
+      const provider = mockProvider([]);
+      provider.fetchNewMessages = jest
+        .fn()
+        .mockImplementationOnce(() => Promise.reject(new Error('down')))
+        .mockResolvedValueOnce([]);
+      (getEmailProvider as jest.Mock).mockReturnValue(provider);
+
+      const summaries = await pollAllMailboxes();
+
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0].mailbox).toBe('jordan@aeonsynergies.com');
     });
   });
 });

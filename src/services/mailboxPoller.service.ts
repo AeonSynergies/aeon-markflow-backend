@@ -86,6 +86,34 @@ async function resolveFallbackOrgId(domain: string): Promise<string | undefined>
   return org?._id.toString();
 }
 
+/**
+ * Every mailbox that actually sends mail for a domain, across every org configured to send from
+ * it — not just the deployment-level registry's single default. A domain can be shared by more
+ * than one org (e.g. Aeon Miles sending via the Aeon Synergies domain), and each org's own
+ * `sending_domains[]` entry for that domain can in turn list several mailboxes (round-robinned
+ * by mailboxAssignment.service.ts at send time — see domainRouter.service.ts). Every one of them
+ * is a real address bounces/complaints/replies can land in, so every one needs polling, not just
+ * one per domain. Falls back to the deployment-level default mailbox only when no org has
+ * configured any mailboxes[] of its own for this domain yet — same fallback DomainRouter's own
+ * resolveSendingRoute/assignMailboxesForDomains already use, so an unmigrated org's mail still
+ * gets polled exactly as before this existed.
+ */
+async function resolveMailboxesForDomain(domain: string, fallbackMailbox: string): Promise<string[]> {
+  const orgs = await Organization.find({ 'sending_domains.domain': domain }).lean();
+
+  const mailboxes = new Set<string>();
+  for (const org of orgs) {
+    for (const entry of org.sending_domains) {
+      if (entry.domain !== domain) continue;
+      for (const mailbox of entry.mailboxes) {
+        mailboxes.add(mailbox.address);
+      }
+    }
+  }
+
+  return mailboxes.size > 0 ? [...mailboxes] : [fallbackMailbox];
+}
+
 export interface MailboxPollSummary {
   domain: string;
   mailbox: string;
@@ -220,18 +248,33 @@ export async function pollMailbox(domain: string, mailbox: string, provider: Ema
   return summary;
 }
 
-/** Polls every deployment-configured sending mailbox once. See scheduling in mailboxPollQueue.ts. */
+/**
+ * Polls every actual sending mailbox once — every mailbox any org has configured for a
+ * deployment-registered domain (resolveMailboxesForDomain), not just one default per domain. See
+ * scheduling in mailboxPollQueue.ts.
+ */
 export async function pollAllMailboxes(): Promise<MailboxPollSummary[]> {
   const domainMap = getDomainProviderMap();
   const summaries: MailboxPollSummary[] = [];
 
   for (const [domain, config] of Object.entries(domainMap)) {
+    let provider: EmailProvider;
     try {
-      const provider = getEmailProvider(config.provider);
-      summaries.push(await pollMailbox(domain, config.mailbox, provider));
+      provider = getEmailProvider(config.provider);
     } catch (error) {
       // eslint-disable-next-line no-console
-      console.error(`Mailbox poll failed for ${domain} (${config.mailbox}):`, error);
+      console.error(`Mailbox poll failed for ${domain} (provider ${config.provider}):`, error);
+      continue;
+    }
+
+    const mailboxes = await resolveMailboxesForDomain(domain, config.mailbox);
+    for (const mailbox of mailboxes) {
+      try {
+        summaries.push(await pollMailbox(domain, mailbox, provider));
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error(`Mailbox poll failed for ${domain} (${mailbox}):`, error);
+      }
     }
   }
 
