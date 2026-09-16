@@ -135,6 +135,7 @@ describe('workflowTemplate.routes handlers', () => {
         enrolledCount: 2,
         skippedCount: 1,
         enrollmentIds: ['enr-1', 'enr-2'],
+        rejections: [{ leadId: 'lead-3', reason: 'Contact has opted out (global_do_not_contact)' }],
       });
 
       const req = {
@@ -151,6 +152,8 @@ describe('workflowTemplate.routes handlers', () => {
         enrolled_count: 2,
         skipped_count: 1,
         enrollment_ids: ['enr-1', 'enr-2'],
+        rejected_count: 1,
+        rejections: [{ lead_id: 'lead-3', reason: 'Contact has opted out (global_do_not_contact)' }],
       });
     });
 

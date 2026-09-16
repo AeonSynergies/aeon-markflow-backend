@@ -1,6 +1,8 @@
+jest.mock('../../src/models/Contact.model', () => ({ Contact: { findById: jest.fn() } }));
 jest.mock('../../src/models/Enrollment.model', () => ({
   Enrollment: { create: jest.fn(), findById: jest.fn(), find: jest.fn() },
 }));
+jest.mock('../../src/models/Lead.model', () => ({ Lead: { findById: jest.fn() } }));
 jest.mock('../../src/models/Organization.model', () => ({ Organization: { findById: jest.fn() } }));
 jest.mock('../../src/models/SavedList.model', () => ({ SavedList: { findById: jest.fn() } }));
 jest.mock('../../src/queues/enrollmentQueue', () => ({ enqueueStepJob: jest.fn() }));
@@ -13,7 +15,9 @@ jest.mock('../../src/services/abTesting.service', () => ({
   resolveStepForEnrollment: jest.fn((step) => Promise.resolve(step)),
 }));
 
+import { Contact } from '../../src/models/Contact.model';
 import { Enrollment } from '../../src/models/Enrollment.model';
+import { Lead } from '../../src/models/Lead.model';
 import { Organization } from '../../src/models/Organization.model';
 import { SavedList } from '../../src/models/SavedList.model';
 import { enqueueStepJob } from '../../src/queues/enrollmentQueue';
@@ -48,6 +52,12 @@ describe('enrollment.service enrollSavedList', () => {
   beforeEach(() => {
     mockOrg();
     (assignMailboxesForDomains as jest.Mock).mockResolvedValue([]);
+    (Lead.findById as jest.Mock).mockReturnValue({
+      lean: jest.fn().mockResolvedValue({ contact_id: 'contact-1' }),
+    });
+    (Contact.findById as jest.Mock).mockReturnValue({
+      lean: jest.fn().mockResolvedValue({ global_do_not_contact: false }),
+    });
   });
   afterEach(() => jest.clearAllMocks());
 
@@ -98,7 +108,7 @@ describe('enrollment.service enrollSavedList', () => {
     });
     expect(enqueueStepJob).toHaveBeenNthCalledWith(1, 'enr-1', 0, 0);
     expect(enqueueStepJob).toHaveBeenNthCalledWith(2, 'enr-2', 0, 0);
-    expect(result).toEqual({ enrolledCount: 2, skippedCount: 0, enrollmentIds: ['enr-1', 'enr-2'] });
+    expect(result).toEqual({ enrolledCount: 2, skippedCount: 0, enrollmentIds: ['enr-1', 'enr-2'], rejections: [] });
   });
 
   it('assigns one mailbox per distinct sending_domain among the steps, once, and snapshots it onto the enrollment', async () => {
@@ -196,7 +206,7 @@ describe('enrollment.service enrollSavedList', () => {
 
     const result = await enrollSavedList('tpl-1', 'list-1');
 
-    expect(result).toEqual({ enrolledCount: 1, skippedCount: 1, enrollmentIds: ['enr-2'] });
+    expect(result).toEqual({ enrolledCount: 1, skippedCount: 1, enrollmentIds: ['enr-2'], rejections: [] });
     expect(enqueueStepJob).toHaveBeenCalledTimes(1);
   });
 
@@ -208,6 +218,94 @@ describe('enrollment.service enrollSavedList', () => {
     (Enrollment.create as jest.Mock).mockRejectedValueOnce(new Error('mongo down'));
 
     await expect(enrollSavedList('tpl-1', 'list-1')).rejects.toThrow('mongo down');
+  });
+
+  describe('global_do_not_contact suppression', () => {
+    it('rejects a lead whose contact has opted out, instead of creating an enrollment', async () => {
+      mockTemplate();
+      (SavedList.findById as jest.Mock).mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ org_id: { toString: () => 'org-1' }, lead_ids: ['lead-1'] }),
+      });
+      (Contact.findById as jest.Mock).mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ global_do_not_contact: true }),
+      });
+
+      const result = await enrollSavedList('tpl-1', 'list-1');
+
+      expect(Enrollment.create).not.toHaveBeenCalled();
+      expect(enqueueStepJob).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        enrolledCount: 0,
+        skippedCount: 0,
+        enrollmentIds: [],
+        rejections: [{ leadId: 'lead-1', reason: expect.stringContaining('opted out') }],
+      });
+    });
+
+    it('rejects only the suppressed lead, enrolling every other lead in the same batch', async () => {
+      mockTemplate();
+      (SavedList.findById as jest.Mock).mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ org_id: { toString: () => 'org-1' }, lead_ids: ['lead-1', 'lead-2'] }),
+      });
+      (Contact.findById as jest.Mock)
+        .mockReturnValueOnce({ lean: jest.fn().mockResolvedValue({ global_do_not_contact: true }) })
+        .mockReturnValueOnce({ lean: jest.fn().mockResolvedValue({ global_do_not_contact: false }) });
+      (Enrollment.create as jest.Mock).mockResolvedValueOnce({ _id: { toString: () => 'enr-2' } });
+
+      const result = await enrollSavedList('tpl-1', 'list-1');
+
+      expect(Enrollment.create).toHaveBeenCalledTimes(1);
+      expect(Enrollment.create).toHaveBeenCalledWith(expect.objectContaining({ lead_id: 'lead-2' }));
+      expect(result.enrolledCount).toBe(1);
+      expect(result.rejections).toEqual([{ leadId: 'lead-1', reason: expect.stringContaining('opted out') }]);
+    });
+
+    it('overrides an eligible-for-re-engagement lead — the recycle/win-back flow has no separate enrollment path to bypass this', async () => {
+      // There's no dedicated recycle/win-back enrollment function in this codebase — a recycled
+      // lead still goes through enrollSavedList like any other, so the suppression check applies
+      // to it identically regardless of eligible_for_reengagement_at or lost_reason/lost_stage.
+      mockTemplate();
+      (SavedList.findById as jest.Mock).mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ org_id: { toString: () => 'org-1' }, lead_ids: ['lead-1'] }),
+      });
+      (Contact.findById as jest.Mock).mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ global_do_not_contact: true }),
+      });
+
+      const result = await enrollSavedList('tpl-1', 'list-1');
+
+      expect(Enrollment.create).not.toHaveBeenCalled();
+      expect(result.rejections).toHaveLength(1);
+    });
+
+    it('does not suppress (fails open) when the Lead cannot be found', async () => {
+      mockTemplate();
+      (SavedList.findById as jest.Mock).mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ org_id: { toString: () => 'org-1' }, lead_ids: ['lead-1'] }),
+      });
+      (Lead.findById as jest.Mock).mockReturnValue({ lean: jest.fn().mockResolvedValue(null) });
+      (Enrollment.create as jest.Mock).mockResolvedValueOnce({ _id: { toString: () => 'enr-1' } });
+
+      const result = await enrollSavedList('tpl-1', 'list-1');
+
+      expect(Contact.findById).not.toHaveBeenCalled();
+      expect(Enrollment.create).toHaveBeenCalled();
+      expect(result.rejections).toEqual([]);
+    });
+
+    it('does not suppress (fails open) when the Contact cannot be found', async () => {
+      mockTemplate();
+      (SavedList.findById as jest.Mock).mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ org_id: { toString: () => 'org-1' }, lead_ids: ['lead-1'] }),
+      });
+      (Contact.findById as jest.Mock).mockReturnValue({ lean: jest.fn().mockResolvedValue(null) });
+      (Enrollment.create as jest.Mock).mockResolvedValueOnce({ _id: { toString: () => 'enr-1' } });
+
+      const result = await enrollSavedList('tpl-1', 'list-1');
+
+      expect(Enrollment.create).toHaveBeenCalled();
+      expect(result.rejections).toEqual([]);
+    });
   });
 });
 

@@ -56,10 +56,17 @@ export interface EnrollSavedListRequest {
   saved_list_id: string;
 }
 
+export interface EnrollmentRejectionResponse {
+  lead_id: string;
+  reason: string;
+}
+
 export interface EnrollSavedListResponse {
   enrolled_count: number;
   skipped_count: number;
   enrollment_ids: string[];
+  rejected_count: number;
+  rejections: EnrollmentRejectionResponse[];
 }
 
 export interface ErrorResponse {
