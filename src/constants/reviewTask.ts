@@ -12,10 +12,18 @@ export type ReviewTaskStatus = (typeof REVIEW_TASK_STATUSES)[number];
 // (day/hour/timezone, content) combination for one (org, workflow_type, persona) group under the
 // org's ai_suggested strategy — see sendTimeOptimization.service.ts. Never created under
 // ai_automatic, which applies a validated recommendation directly, with no ReviewTask.
+// lead_unsubscribe_request: an inbound reply was AI-classified as an unsubscribe request —
+// see replyIntentClassifier.service.ts / mailboxPoller.service.ts. Unlike every other kind, the
+// action this task documents (Contact.global_do_not_contact set, every active enrollment for the
+// lead exited) has already happened autonomously by the time this task opens — same
+// human-in-the-loop exception as domain_guardrail: a compliance/safety action, not a
+// content/strategy judgment call, so it's a record for a human to review, not a pending approval
+// gate.
 export const REVIEW_TASK_KINDS = [
   'email_template_version',
   'domain_guardrail',
   'email_version_deliverability',
   'send_time_recommendation',
+  'lead_unsubscribe_request',
 ] as const;
 export type ReviewTaskKind = (typeof REVIEW_TASK_KINDS)[number];

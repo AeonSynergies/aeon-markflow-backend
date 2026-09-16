@@ -49,4 +49,57 @@ describe('LeadActivity model', () => {
     );
     expect(dedupeIndex).toBeDefined();
   });
+
+  it('leaves ai_reply_classification undefined by default', () => {
+    const doc = new LeadActivity({ lead_id: new Types.ObjectId(), kind: 'email' });
+    expect(doc.validateSync()).toBeUndefined();
+    expect(doc.ai_reply_classification).toBeUndefined();
+  });
+
+  it('accepts an inbound reply with an AI reply classification', () => {
+    const doc = new LeadActivity({
+      lead_id: new Types.ObjectId(),
+      kind: 'email',
+      direction: 'inbound',
+      ai_reply_classification: {
+        intent: 'interested',
+        confidence: 0.9,
+        reasoning: 'Explicitly asked to book a call',
+        model: 'claude-opus-5',
+        classified_at: new Date(),
+      },
+    });
+    expect(doc.validateSync()).toBeUndefined();
+    expect(doc.ai_reply_classification).toMatchObject({ intent: 'interested', confidence: 0.9 });
+  });
+
+  it('rejects an unknown ai_reply_classification.intent', () => {
+    const doc = new LeadActivity({
+      lead_id: new Types.ObjectId(),
+      kind: 'email',
+      ai_reply_classification: {
+        intent: 'spam',
+        confidence: 0.9,
+        reasoning: 'x',
+        model: 'claude-opus-5',
+        classified_at: new Date(),
+      },
+    });
+    expect(doc.validateSync()?.errors['ai_reply_classification.intent']).toBeDefined();
+  });
+
+  it('rejects a confidence outside [0, 1]', () => {
+    const doc = new LeadActivity({
+      lead_id: new Types.ObjectId(),
+      kind: 'email',
+      ai_reply_classification: {
+        intent: 'unclear',
+        confidence: 1.5,
+        reasoning: 'x',
+        model: 'claude-opus-5',
+        classified_at: new Date(),
+      },
+    });
+    expect(doc.validateSync()?.errors['ai_reply_classification.confidence']).toBeDefined();
+  });
 });

@@ -7,7 +7,15 @@ import { Lead } from '../models/Lead.model';
 import { LeadActivity, type LeadActivityDocument } from '../models/LeadActivity.model';
 import { MailboxPollCursor } from '../models/MailboxPollCursor.model';
 import { Organization } from '../models/Organization.model';
+import { ReviewTask } from '../models/ReviewTask.model';
+import { exitAllActiveEnrollmentsForLead, exitEnrollment } from './enrollment.service';
 import { classifySystemMessage, extractReferencedRecipient } from './inboundMessageClassifier';
+import { sendInternalNotification } from './internalNotification.service';
+import {
+  classifyReplyIntent,
+  ReplyIntentClassificationError,
+  type ReplyIntentClassification,
+} from './replyIntentClassifier.service';
 import { recordDeliverabilityEvent } from './sendGuardrail.service';
 
 /** How many messages to pull per mailbox per poll — generous relative to the poll interval. */
@@ -161,6 +169,79 @@ async function processDeliverabilityMessage(
   }
 }
 
+/**
+ * Never lets a classification failure (a transient Anthropic outage, a malformed response) take
+ * down the rest of this mailbox's poll — the bounce/reply pipeline's own robustness matters more
+ * than any one reply's classification. Falls back to an honest 'unclear' rather than skipping
+ * the reply or the poll entirely: the reply itself still gets logged and counted either way.
+ */
+async function classifyReplySafely(message: InboundMessage): Promise<ReplyIntentClassification> {
+  try {
+    return await classifyReplyIntent({ subject: message.subject, bodyText: message.bodyText, bodyHtml: message.bodyHtml });
+  } catch (error) {
+    if (error instanceof ReplyIntentClassificationError) {
+      // eslint-disable-next-line no-console
+      console.error('Reply intent classification failed:', error);
+      return {
+        intent: 'unclear',
+        confidence: 0,
+        reasoning: 'Classification failed — see server logs.',
+        model: 'none',
+      };
+    }
+    throw error;
+  }
+}
+
+/**
+ * The one autonomous, contact-facing action this pipeline takes — same category as
+ * SendGuardrail's autonomous domain pause (a compliance/safety action, not a content/strategy
+ * judgment call), so it takes effect immediately, before any human approves it. Mirrors
+ * pauseDomain's own three-part shape: mutate state, open a ReviewTask so a human sees it
+ * happened, send an internal notification. Idempotent — a contact already suppressed doesn't
+ * get a duplicate ReviewTask/notification for a repeat unsubscribe signal (its active
+ * enrollments, if any survived a first pass, still get exited every time).
+ */
+async function suppressContactForUnsubscribe(
+  leadId: string,
+  leadActivityId: string,
+  orgId: string,
+  reasoning: string,
+): Promise<void> {
+  const lead = await Lead.findById(leadId).lean();
+  if (!lead) return;
+
+  const contact = await Contact.findById(lead.contact_id);
+  const alreadySuppressed = contact?.global_do_not_contact ?? false;
+
+  if (contact && !alreadySuppressed) {
+    contact.global_do_not_contact = true;
+    await contact.save();
+  }
+
+  await exitAllActiveEnrollmentsForLead(leadId, 'unsubscribe_request');
+
+  if (alreadySuppressed) return;
+
+  const reviewTask = await ReviewTask.create({
+    org_id: orgId,
+    kind: 'lead_unsubscribe_request',
+    lead_id: leadId,
+    lead_activity_id: leadActivityId,
+    status: 'OPEN',
+    rejection_reason: reasoning,
+  });
+
+  await sendInternalNotification({
+    subject: '[MarkFlow] Unsubscribe request detected — lead suppressed',
+    html:
+      '<p>A reply was AI-classified as an unsubscribe request. The contact has been suppressed ' +
+      '(global_do_not_contact) and every active workflow enrollment for this lead has been exited.</p>' +
+      `<p>Reasoning: ${reasoning}</p>` +
+      `<p>A ReviewTask (id ${reviewTask._id}) is open for review.</p>`,
+  });
+}
+
 async function processCandidateReply(message: InboundMessage, domain: string, mailbox: string, summary: MailboxPollSummary): Promise<void> {
   const correlated =
     (await correlateByThread(message.providerThreadId)) ?? (await correlateByEmailAddress(message.from));
@@ -178,7 +259,12 @@ async function processCandidateReply(message: InboundMessage, domain: string, ma
   });
   if (alreadyLogged) return;
 
-  await LeadActivity.create({
+  // A triage aid only — classifyReplySafely never drafts or sends anything, and its result
+  // never blocks logging the reply itself. Only two intents drive further autonomous action,
+  // handled below; every other classification is purely stored for a human to read.
+  const classification = await classifyReplySafely(message);
+
+  const leadActivity = await LeadActivity.create({
     lead_id: correlated.leadId,
     kind: 'email',
     direction: 'inbound',
@@ -190,6 +276,13 @@ async function processCandidateReply(message: InboundMessage, domain: string, ma
     provider_message_id: message.providerMessageId,
     provider_thread_id: message.providerThreadId,
     occurred_at: message.receivedAt,
+    ai_reply_classification: {
+      intent: classification.intent,
+      confidence: classification.confidence,
+      reasoning: classification.reasoning,
+      model: classification.model,
+      classified_at: new Date(),
+    },
   });
 
   await recordDeliverabilityEvent(domain, mailbox, correlated.orgId, 'replied', {
@@ -198,6 +291,20 @@ async function processCandidateReply(message: InboundMessage, domain: string, ma
     emailTemplateVersionId: correlated.emailTemplateVersionId,
   });
   summary.replied += 1;
+
+  if (classification.intent === 'unsubscribe_request') {
+    await suppressContactForUnsubscribe(
+      correlated.leadId,
+      leadActivity._id.toString(),
+      correlated.orgId,
+      classification.reasoning,
+    );
+  } else if (classification.intent === 'interested' && correlated.enrollmentId) {
+    // Consistent with the Aeon Miles playbook's own instruction to move an interested lead out
+    // of automation immediately — a workflow-state transition, not content generation, so it
+    // isn't gated behind human approval the way a drafted reply would be.
+    await exitEnrollment(correlated.enrollmentId, 'reply_interested');
+  }
 }
 
 /**

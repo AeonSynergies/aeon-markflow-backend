@@ -95,4 +95,25 @@ describe('ReviewTask model', () => {
     });
     expect(doc.validateSync()).toBeUndefined();
   });
+
+  it('requires lead_id and lead_activity_id (not email_template_version_id) when kind is lead_unsubscribe_request', () => {
+    const doc = new ReviewTask({
+      org_id: new Types.ObjectId(),
+      kind: 'lead_unsubscribe_request',
+    });
+    const err = doc.validateSync();
+    expect(err?.errors.lead_id).toBeDefined();
+    expect(err?.errors.lead_activity_id).toBeDefined();
+    expect(err?.errors.email_template_version_id).toBeUndefined();
+  });
+
+  it('validates a lead_unsubscribe_request review task with lead_id and lead_activity_id set', () => {
+    const doc = new ReviewTask({
+      org_id: new Types.ObjectId(),
+      kind: 'lead_unsubscribe_request',
+      lead_id: new Types.ObjectId(),
+      lead_activity_id: new Types.ObjectId(),
+    });
+    expect(doc.validateSync()).toBeUndefined();
+  });
 });
