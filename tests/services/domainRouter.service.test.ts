@@ -8,6 +8,7 @@ jest.mock('../../src/services/mailboxAssignment.service', () => ({ assignMailbox
 import { getEmailProvider } from '../../src/emailProviders/providerRegistry';
 import { assignMailboxForDomain } from '../../src/services/mailboxAssignment.service';
 import {
+  assignMailboxesForDomains,
   DomainNotAllowedForOrgError,
   resolveSendingRoute,
   routableDomainsForOrg,
@@ -80,6 +81,23 @@ describe('domainRouter.service', () => {
     expect(route.mailbox).toBe('jordan@aeonsynergies.com');
   });
 
+  it('uses options.assignedMailbox verbatim when given, skipping round-robin and the deployment-map fallback', async () => {
+    process.env.DOMAIN_PROVIDER_MAP_JSON = JSON.stringify({
+      'aeonsynergies.com': { provider: 'microsoft_graph', mailbox: 'fallback@aeonsynergies.com' },
+    });
+    const mailboxes = [{ address: 'alex@aeonsynergies.com', display_name: null, status: 'active' as const }];
+
+    const route = await resolveSendingRoute(
+      org([{ domain: 'aeonsynergies.com', purpose: 'marketing', mailboxes }]),
+      'aeonsynergies.com',
+      'marketing',
+      { assignedMailbox: 'pre-assigned@aeonsynergies.com' },
+    );
+
+    expect(route.mailbox).toBe('pre-assigned@aeonsynergies.com');
+    expect(assignMailboxForDomain).not.toHaveBeenCalled();
+  });
+
   it('rejects a domain the org is not configured to send from', async () => {
     process.env.DOMAIN_PROVIDER_MAP_JSON = JSON.stringify({
       'aeonmiles.com': { provider: 'google_workspace', mailbox: 'sales@aeonmiles.com' },
@@ -135,5 +153,81 @@ describe('domainRouter.service', () => {
       'marketing',
     );
     expect(domains).toEqual(['aeonmiles.com']);
+  });
+
+  describe('assignMailboxesForDomains', () => {
+    it('assigns a mailbox per distinct domain, deduping repeats', async () => {
+      process.env.DOMAIN_PROVIDER_MAP_JSON = JSON.stringify({
+        'aeonsign.com': { provider: 'zoho_mail', mailbox: 'fallback@aeonsign.com' },
+      });
+      const mailboxes = [{ address: 'alex@aeonsign.com', display_name: null, status: 'active' as const }];
+      (assignMailboxForDomain as jest.Mock).mockResolvedValue('alex@aeonsign.com');
+
+      const result = await assignMailboxesForDomains(
+        org([{ domain: 'aeonsign.com', purpose: 'marketing', mailboxes }]),
+        ['aeonsign.com', 'aeonsign.com'],
+        'marketing',
+      );
+
+      expect(assignMailboxForDomain).toHaveBeenCalledTimes(1);
+      expect(result).toEqual([{ domain: 'aeonsign.com', mailbox: 'alex@aeonsign.com' }]);
+    });
+
+    it('falls back to the deployment-map mailbox per domain when the org has none configured', async () => {
+      process.env.DOMAIN_PROVIDER_MAP_JSON = JSON.stringify({
+        'aeonsign.com': { provider: 'zoho_mail', mailbox: 'fallback@aeonsign.com' },
+      });
+
+      const result = await assignMailboxesForDomains(
+        org([{ domain: 'aeonsign.com', purpose: 'marketing' }]),
+        ['aeonsign.com'],
+        'marketing',
+      );
+
+      expect(result).toEqual([{ domain: 'aeonsign.com', mailbox: 'fallback@aeonsign.com' }]);
+      expect(assignMailboxForDomain).not.toHaveBeenCalled();
+    });
+
+    it('resolves several distinct domains independently', async () => {
+      process.env.DOMAIN_PROVIDER_MAP_JSON = JSON.stringify({
+        'aeonsign.com': { provider: 'zoho_mail', mailbox: 'sales@aeonsign.com' },
+        'aeonmiles.com': { provider: 'google_workspace', mailbox: 'sales@aeonmiles.com' },
+      });
+
+      const result = await assignMailboxesForDomains(
+        org([
+          { domain: 'aeonsign.com', purpose: 'marketing' },
+          { domain: 'aeonmiles.com', purpose: 'marketing' },
+        ]),
+        ['aeonsign.com', 'aeonmiles.com'],
+        'marketing',
+      );
+
+      expect(result).toEqual(
+        expect.arrayContaining([
+          { domain: 'aeonsign.com', mailbox: 'sales@aeonsign.com' },
+          { domain: 'aeonmiles.com', mailbox: 'sales@aeonmiles.com' },
+        ]),
+      );
+    });
+
+    it('returns an empty array for an empty domain list without touching the org or provider map', async () => {
+      const result = await assignMailboxesForDomains(org([]), [], 'marketing');
+      expect(result).toEqual([]);
+    });
+
+    it('rejects a domain the org is not configured to send from', async () => {
+      process.env.DOMAIN_PROVIDER_MAP_JSON = JSON.stringify({});
+      await expect(
+        assignMailboxesForDomains(org([{ domain: 'aeonmiles.com', purpose: 'marketing' }]), ['aeonsign.com'], 'marketing'),
+      ).rejects.toThrow(DomainNotAllowedForOrgError);
+    });
+
+    it('rejects a domain with no provider mapping even if the org lists it', async () => {
+      process.env.DOMAIN_PROVIDER_MAP_JSON = JSON.stringify({});
+      await expect(
+        assignMailboxesForDomains(org([{ domain: 'aeonmiles.com', purpose: 'marketing' }]), ['aeonmiles.com'], 'marketing'),
+      ).rejects.toThrow(UnroutableDomainError);
+    });
   });
 });

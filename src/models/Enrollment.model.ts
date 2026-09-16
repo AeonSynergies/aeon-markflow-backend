@@ -3,6 +3,14 @@ import { ENROLLMENT_STATUSES } from '../constants/workflow';
 import { SEND_TIME_STRATEGIES } from '../constants/sendTimeOptimization';
 import { workflowStepSchema } from './schemas/workflowStep.schema';
 
+const assignedMailboxSchema = new Schema(
+  {
+    domain: { type: String, required: true, trim: true },
+    mailbox: { type: String, required: true, trim: true },
+  },
+  { _id: false },
+);
+
 const enrollmentSchema = new Schema(
   {
     lead_id: { type: Schema.Types.ObjectId, ref: 'Lead', required: true },
@@ -11,6 +19,14 @@ const enrollmentSchema = new Schema(
     // WorkflowTemplate, so editing a template can never silently change a sequence a lead is
     // already enrolled in.
     steps: { type: [workflowStepSchema], required: true },
+    // One mailbox per distinct sending_domain among this enrollment's own email steps, assigned
+    // once by domainRouter.service.ts's assignMailboxesForDomains at enrollment creation
+    // (enrollment.service.ts) and reused by every step that sends from that domain — never
+    // re-resolved per send. Without this, the same lead's sequence could visibly send from a
+    // different named mailbox at every touch instead of one consistent sender throughout.
+    // Defaults to [] for an enrollment created before this existed; sendWorkflowEmail falls back
+    // to resolving a mailbox on the spot for those (see resolveSendingRoute).
+    assigned_mailboxes: { type: [assignedMailboxSchema], default: [] },
     // Same snapshot reasoning as steps: SendGuardrail reads this to decide whether to apply
     // ramp-up throttling to this enrollment's email sends (see sendGuardrail.service.ts). Frozen
     // at enrollment time so toggling a template's warmup flag never silently changes behavior

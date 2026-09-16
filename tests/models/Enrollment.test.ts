@@ -88,6 +88,40 @@ describe('Enrollment model', () => {
     expect(compound?.[1].partialFilterExpression).toEqual({ status: 'active' });
   });
 
+  it('defaults assigned_mailboxes to an empty array', () => {
+    const doc = new Enrollment({
+      lead_id: new Types.ObjectId(),
+      workflow_template_id: new Types.ObjectId(),
+      steps: [validStep()],
+    });
+    expect(doc.assigned_mailboxes).toEqual([]);
+  });
+
+  it('snapshots an assigned_mailboxes entry per domain', () => {
+    const doc = new Enrollment({
+      lead_id: new Types.ObjectId(),
+      workflow_template_id: new Types.ObjectId(),
+      steps: [validStep()],
+      assigned_mailboxes: [
+        { domain: 'aeonsign.com', mailbox: 'alex@aeonsign.com' },
+        { domain: 'aeonmiles.com', mailbox: 'sales@aeonmiles.com' },
+      ],
+    });
+    expect(doc.validateSync()).toBeUndefined();
+    expect(doc.assigned_mailboxes).toHaveLength(2);
+    expect(doc.assigned_mailboxes?.[0]).toMatchObject({ domain: 'aeonsign.com', mailbox: 'alex@aeonsign.com' });
+  });
+
+  it('requires both domain and mailbox on an assigned_mailboxes entry', () => {
+    const doc = new Enrollment({
+      lead_id: new Types.ObjectId(),
+      workflow_template_id: new Types.ObjectId(),
+      steps: [validStep()],
+      assigned_mailboxes: [{ domain: 'aeonsign.com' }],
+    });
+    expect(doc.validateSync()?.errors['assigned_mailboxes.0.mailbox']).toBeDefined();
+  });
+
   it('still validates each snapshotted step the same way a WorkflowTemplate step would', () => {
     const doc = new Enrollment({
       lead_id: new Types.ObjectId(),

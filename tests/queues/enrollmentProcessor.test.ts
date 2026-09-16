@@ -205,6 +205,7 @@ describe('processEnrollmentStepJob', () => {
         expect.objectContaining({ sending_domains: [{ domain: 'aeonsign.com', purpose: 'marketing' }] }),
         'aeonsign.com',
         'marketing',
+        { assignedMailbox: undefined },
       );
       expect(canSend).toHaveBeenCalledWith('aeonsign.com', 'sales@aeonsign.com', 'org-1', {
         requiresWarmup: false,
@@ -274,6 +275,64 @@ describe('processEnrollmentStepJob', () => {
 
       expect(canSend).toHaveBeenCalledWith('aeonsign.com', 'sales@aeonsign.com', 'org-1', {
         requiresWarmup: true,
+      });
+    });
+
+    describe('mailbox assignment', () => {
+      it('passes the enrollment-frozen assigned_mailboxes entry for this step\'s domain, not a fresh resolution', async () => {
+        mockEmailPipeline();
+        mockEnrollment({
+          current_step_index: 1,
+          assigned_mailboxes: [{ domain: 'aeonsign.com', mailbox: 'alex@aeonsign.com' }],
+          steps: [
+            { kind: 'wait', wait_amount: 1, wait_unit: 'days' },
+            { kind: 'email', email_template_version_id: 'ver-1', sending_domain: 'aeonsign.com' },
+          ],
+        });
+
+        await processEnrollmentStepJob('enr-1');
+
+        expect(resolveSendingRoute).toHaveBeenCalledWith(
+          expect.anything(),
+          'aeonsign.com',
+          'marketing',
+          { assignedMailbox: 'alex@aeonsign.com' },
+        );
+      });
+
+      it('falls back to no pre-assignment (letting resolveSendingRoute resolve on the spot) for an enrollment with none stored', async () => {
+        mockEmailPipeline();
+        mockEnrollment({
+          current_step_index: 0,
+          steps: [{ kind: 'email', email_template_version_id: 'ver-1', sending_domain: 'aeonsign.com' }],
+        });
+
+        await processEnrollmentStepJob('enr-1');
+
+        expect(resolveSendingRoute).toHaveBeenCalledWith(
+          expect.anything(),
+          'aeonsign.com',
+          'marketing',
+          { assignedMailbox: undefined },
+        );
+      });
+
+      it('ignores an assigned_mailboxes entry for a different domain than this step sends from', async () => {
+        mockEmailPipeline();
+        mockEnrollment({
+          current_step_index: 0,
+          assigned_mailboxes: [{ domain: 'other-domain.com', mailbox: 'jordan@other-domain.com' }],
+          steps: [{ kind: 'email', email_template_version_id: 'ver-1', sending_domain: 'aeonsign.com' }],
+        });
+
+        await processEnrollmentStepJob('enr-1');
+
+        expect(resolveSendingRoute).toHaveBeenCalledWith(
+          expect.anything(),
+          'aeonsign.com',
+          'marketing',
+          { assignedMailbox: undefined },
+        );
       });
     });
 
