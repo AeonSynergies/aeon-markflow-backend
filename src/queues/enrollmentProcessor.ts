@@ -89,8 +89,16 @@ async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowS
   }
 
   // Workflow enrollment sends are always MarkFlow's own cold-outreach/sequence sends — always
-  // resolved against the org's marketing-purpose domains, never transactional/alerts ones.
-  const route = await resolveSendingRoute(org, step.sending_domain, 'marketing');
+  // resolved against the org's marketing-purpose domains, never transactional/alerts ones. The
+  // mailbox itself was already assigned once, at enrollment creation (assignMailboxesForDomains,
+  // see enrollment.service.ts) — reusing it here, rather than re-resolving on every send, is what
+  // keeps one enrollment's own sequence sending from the same named mailbox throughout instead of
+  // flapping between a domain's mailboxes step to step. An enrollment created before this existed
+  // has no assignment for this domain yet, so resolveSendingRoute falls back to resolving one on
+  // the spot for it.
+  const assignedMailbox = enrollment.assigned_mailboxes?.find((entry) => entry.domain === step.sending_domain)
+    ?.mailbox;
+  const route = await resolveSendingRoute(org, step.sending_domain, 'marketing', { assignedMailbox });
 
   const decision = await canSend(route.domain, route.mailbox, orgId, {
     requiresWarmup: enrollment.requires_warmup ?? false,

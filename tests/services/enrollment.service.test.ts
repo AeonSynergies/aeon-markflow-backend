@@ -6,11 +6,16 @@ jest.mock('../../src/services/workflowTemplate.service', () => ({
   ...jest.requireActual('../../src/services/workflowTemplate.service'),
   getWorkflowTemplate: jest.fn(),
 }));
+jest.mock('../../src/services/domainRouter.service', () => ({ assignMailboxesForDomains: jest.fn() }));
+jest.mock('../../src/services/abTesting.service', () => ({
+  resolveStepForEnrollment: jest.fn((step) => Promise.resolve(step)),
+}));
 
 import { Enrollment } from '../../src/models/Enrollment.model';
 import { Organization } from '../../src/models/Organization.model';
 import { SavedList } from '../../src/models/SavedList.model';
 import { enqueueStepJob } from '../../src/queues/enrollmentQueue';
+import { assignMailboxesForDomains } from '../../src/services/domainRouter.service';
 import {
   CrossOrgReferenceError,
   EmptyWorkflowTemplateError,
@@ -36,7 +41,10 @@ function mockOrg(overrides: Record<string, unknown> = {}) {
 }
 
 describe('enrollment.service enrollSavedList', () => {
-  beforeEach(() => mockOrg());
+  beforeEach(() => {
+    mockOrg();
+    (assignMailboxesForDomains as jest.Mock).mockResolvedValue([]);
+  });
   afterEach(() => jest.clearAllMocks());
 
   it('throws EmptyWorkflowTemplateError when the template has no steps', async () => {
@@ -80,12 +88,55 @@ describe('enrollment.service enrollSavedList', () => {
       requires_warmup: false,
       workflow_type: null,
       send_time_strategy: 'manual',
+      assigned_mailboxes: [],
       current_step_index: 0,
       status: 'active',
     });
     expect(enqueueStepJob).toHaveBeenNthCalledWith(1, 'enr-1', 0, 0);
     expect(enqueueStepJob).toHaveBeenNthCalledWith(2, 'enr-2', 0, 0);
     expect(result).toEqual({ enrolledCount: 2, skippedCount: 0, enrollmentIds: ['enr-1', 'enr-2'] });
+  });
+
+  it('assigns one mailbox per distinct sending_domain among the steps, once, and snapshots it onto the enrollment', async () => {
+    mockTemplate({
+      steps: [
+        { kind: 'email', email_template_version_id: 'ver-1', sending_domain: 'aeonsign.com' },
+        { kind: 'wait', wait_amount: 1, wait_unit: 'days' },
+        { kind: 'email', email_template_version_id: 'ver-2', sending_domain: 'aeonsign.com' },
+      ],
+    });
+    (SavedList.findById as jest.Mock).mockReturnValue({
+      lean: jest.fn().mockResolvedValue({ org_id: { toString: () => 'org-1' }, lead_ids: ['lead-1'] }),
+    });
+    (assignMailboxesForDomains as jest.Mock).mockResolvedValue([{ domain: 'aeonsign.com', mailbox: 'alex@aeonsign.com' }]);
+    (Enrollment.create as jest.Mock).mockResolvedValueOnce({ _id: { toString: () => 'enr-1' } });
+
+    await enrollSavedList('tpl-1', 'list-1');
+
+    // Called once per lead — not once per email step — with every email step's domain
+    // (assignMailboxesForDomains itself dedupes repeats; see domainRouter.service.test.ts).
+    expect(assignMailboxesForDomains).toHaveBeenCalledTimes(1);
+    expect(assignMailboxesForDomains).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: { toString: expect.any(Function) } }),
+      ['aeonsign.com', 'aeonsign.com'],
+      'marketing',
+    );
+    expect(Enrollment.create).toHaveBeenCalledWith(
+      expect.objectContaining({ assigned_mailboxes: [{ domain: 'aeonsign.com', mailbox: 'alex@aeonsign.com' }] }),
+    );
+  });
+
+  it('does not call assignMailboxesForDomains when the template has no email steps', async () => {
+    mockTemplate({ steps: [{ kind: 'call_task', call_task_instructions: 'Discovery call' }] });
+    (SavedList.findById as jest.Mock).mockReturnValue({
+      lean: jest.fn().mockResolvedValue({ org_id: { toString: () => 'org-1' }, lead_ids: ['lead-1'] }),
+    });
+    (Enrollment.create as jest.Mock).mockResolvedValueOnce({ _id: { toString: () => 'enr-1' } });
+
+    await enrollSavedList('tpl-1', 'list-1');
+
+    expect(assignMailboxesForDomains).toHaveBeenCalledWith(expect.anything(), [], 'marketing');
+    expect(Enrollment.create).toHaveBeenCalledWith(expect.objectContaining({ assigned_mailboxes: [] }));
   });
 
   it('snapshots requires_warmup: true from the template onto each enrollment', async () => {
