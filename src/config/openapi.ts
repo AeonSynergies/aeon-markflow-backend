@@ -111,9 +111,21 @@ export function buildOpenApiSpec(): object {
               name: { type: 'string' },
               persona: { type: 'string' },
               workflow_position: { type: 'string' },
+              intended_workflow_type: { type: 'string' },
               current_version_id: { type: 'string', nullable: true },
               createdAt: { type: 'string', format: 'date-time' },
               updatedAt: { type: 'string', format: 'date-time' },
+            },
+          },
+          EmailTemplateUsageResponse: {
+            type: 'object',
+            properties: {
+              workflow_template_id: { type: 'string' },
+              workflow_template_name: { type: 'string' },
+              workflow_type: { type: 'string', nullable: true },
+              step_index: { type: 'integer' },
+              email_template_version_id: { type: 'string' },
+              version_number: { type: 'integer' },
             },
           },
           EmailTemplateVersionResponse: {

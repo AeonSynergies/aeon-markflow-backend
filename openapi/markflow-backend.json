@@ -228,6 +228,9 @@
           "workflow_position": {
             "type": "string"
           },
+          "intended_workflow_type": {
+            "type": "string"
+          },
           "current_version_id": {
             "type": "string",
             "nullable": true
@@ -239,6 +242,30 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "EmailTemplateUsageResponse": {
+        "type": "object",
+        "properties": {
+          "workflow_template_id": {
+            "type": "string"
+          },
+          "workflow_template_name": {
+            "type": "string"
+          },
+          "workflow_type": {
+            "type": "string",
+            "nullable": true
+          },
+          "step_index": {
+            "type": "integer"
+          },
+          "email_template_version_id": {
+            "type": "string"
+          },
+          "version_number": {
+            "type": "integer"
           }
         }
       },
@@ -591,7 +618,8 @@
     },
     "/orgs/{orgId}/email-templates": {
       "get": {
-        "summary": "List email templates for an org",
+        "summary": "List email templates for an org, optionally filtered by context",
+        "description": "Unfiltered, returns every template in the org (not just those pending approval) — a browsable listing for a UI to show. Filtered by persona/workflow_position/ intended_workflow_type and status=APPROVED, this is also the workflow builder's own template-picker query: it narrows candidates for a step's inspector directly to templates with an approved, pinnable version (current_version_id), instead of listing every approved template in the org.\n",
         "tags": [
           "EmailTemplates"
         ],
@@ -602,6 +630,46 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "persona",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workflow_position",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "intended_workflow_type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "description": "Only templates with at least one version at this status.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "DRAFT",
+                "PENDING_APPROVAL",
+                "APPROVED",
+                "REJECTED",
+                "RESUBMITTED"
+              ]
             }
           }
         ],
@@ -618,6 +686,51 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/email-templates/{templateId}/usages": {
+      "get": {
+        "summary": "List every WorkflowTemplate step currently pinned to a version of this template",
+        "description": "Computed live from WorkflowTemplate.steps on every call — no separate stored index. Never includes Enrollment.steps, which are frozen per-enrollment snapshots that can't be broken by editing or removing this template. Meant to warn a human what would break before they make a destructive change to a template still in use.\n",
+        "tags": [
+          "EmailTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EmailTemplateUsageResponse"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
           }
         }
       }
