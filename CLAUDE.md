@@ -58,7 +58,12 @@ Enrollment     — Lead × WorkflowTemplate instance: current step, status (acti
                  exitEnrollment()/exitAllActiveEnrollmentsForLead() (enrollment.service.ts) — an
                  interested or unsubscribe_request reply classification, today; see "AI reply-intent
                  classification" below
-EmailTemplate  — org-scoped, ab_group_id, current_version_id
+EmailTemplate  — org-scoped, ab_group_id, current_version_id, persona, workflow_position (e.g.
+                 "cold_open", "follow_up_1", "win_back_intro" — matches the Winning Email Library
+                 seed's own categories), intended_workflow_type (which WorkflowTemplate.workflow_type
+                 category, e.g. "cold_outreach", this template is meant for) — all three free-text,
+                 no backing enum; filterable via `GET /orgs/{orgId}/email-templates`, which also
+                 doubles as the workflow builder's template-picker query (see below)
 EmailTemplateVersion — subject_line, body_html, image_blocks[] { block_id, alt_text, placeholder_src },
                  image_policy (always/never/auto — "auto" is enforced at send time by
                  imagePolicy.service.ts, Phase 8), generation_source (ai/human/ai_edited_by_human),
@@ -111,6 +116,14 @@ This is a triage aid, not a content generator — it never drafts or sends anyth
 - No read API yet: `ai_reply_classification` is stored and queryable in Mongo, but this backend has no `Lead`/`LeadActivity` HTTP routes at all (same gap as `Organization` — see "Domain purpose model" below) — nothing in-app surfaces a classified reply to a human yet. That's frontend-adjacent, separate-repo work, or a new route domain neither asked for nor attempted here.
 
 ✅ **`global_do_not_contact` is now enforced at enrollment time.** `Contact.global_do_not_contact` had no reader anywhere in this codebase when `unsubscribe_request` handling first started writing it — `enrollSavedList` (`enrollment.service.ts`) now checks it for every lead before creating an Enrollment (`isContactSuppressed`) and rejects a suppressed lead outright, reported back in the result's `rejections[]` (surfaced through `POST /orgs/{orgId}/workflow-templates/{templateId}/enrollments`'s response as `rejected_count`/`rejections`) rather than silently dropped or created anyway. This applies universally — there is no separate recycle/win-back enrollment path in this codebase to bypass it; every enrollment, a recycled lead's included, goes through `enrollSavedList`, so an explicit opt-out always overrides `eligible_for_reengagement_at`/`lost_reason`/`lost_stage`. Fails open (does not report suppression, matching this function's pre-existing behavior of trusting `SavedList.lead_ids` without validating each id) only when the Lead or Contact itself can't be found — a data-integrity gap that predates this check and isn't what it's trying to fix. Gating `sendWorkflowEmail` on the flag too, for defense in depth against some future second writer of `global_do_not_contact`, is unnecessary today: the only writer (`suppressContactForUnsubscribe`) already exits every active enrollment for that lead in the same operation, so no enrollment can ever be both active and suppressed.
+
+## EmailTemplate browsing, filtering, and usage lookup
+
+✅ **Built.** `EmailTemplate` gains `intended_workflow_type` (free-text, matching `WorkflowTemplate.workflow_type`'s own category values, e.g. "cold_outreach") alongside its existing `persona`/`workflow_position` fields — all three are free-text with no backing enum, same convention throughout this codebase (`workflow_type` itself has never had one either). `GET /orgs/{orgId}/email-templates` (already existed, previously took no filters at all) now accepts `persona`, `workflow_position`, `intended_workflow_type`, and `status` query filters — `status` matches templates with *at least one* version at that status (a join against `EmailTemplateVersion`, since `current_version_id` only ever reflects the most recently *approved* version and can't answer "has a DRAFT/PENDING_APPROVAL/REJECTED one").
+
+**One endpoint serves two roles, deliberately not two separate ones.** Unfiltered, it's the browsable listing a management UI would use to show every template in the org (not just ones pending approval — it always did this; the gap was the missing filters, not missing breadth). Called with `status=APPROVED` plus whatever persona/workflow_position/intended_workflow_type context a step's inspector knows, it's also the workflow builder's own candidate-template picker — narrowing directly to templates that already have an approved, pinnable version (`current_version_id` is right there in the response) instead of listing every approved template in the org. There was no separate pre-existing "picker" endpoint to update: the prior flow was list-everything-unfiltered, then a separate per-template versions call — this single filtered endpoint replaces both steps for the picker's purposes.
+
+`GET /orgs/{orgId}/email-templates/{templateId}/usages` is new: every `WorkflowTemplate` step currently pinned to any version of a template, computed live from `WorkflowTemplate.steps` on every call (no stored index) — meant to warn a human what would break before they edit or retire a template still in use. Deliberately never looks at `Enrollment.steps`: those are frozen per-enrollment snapshots (same "never re-resolved" reasoning as everywhere else in this codebase) that can't be broken by a live template change, so they're not a "current" usage by this endpoint's own definition.
 
 ## Domain purpose model — `Organization.sending_domains[]`
 

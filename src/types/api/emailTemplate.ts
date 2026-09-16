@@ -12,9 +12,20 @@ export interface EmailTemplateResponse {
   name: string;
   persona?: string;
   workflow_position?: string;
+  intended_workflow_type?: string;
   current_version_id?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** One WorkflowTemplate step currently pinned to a version of the queried EmailTemplate. */
+export interface EmailTemplateUsageResponse {
+  workflow_template_id: string;
+  workflow_template_name: string;
+  workflow_type: string | null;
+  step_index: number;
+  email_template_version_id: string;
+  version_number: number;
 }
 
 export interface EmailTemplateVersionResponse {
