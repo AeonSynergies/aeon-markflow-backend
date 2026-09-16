@@ -39,6 +39,22 @@ const reviewTaskSchema = new Schema(
         'send_time_recommendation_id is required when kind is send_time_recommendation',
       ),
     },
+    // Set when kind is lead_unsubscribe_request — see mailboxPoller.service.ts.
+    lead_id: {
+      type: Schema.Types.ObjectId,
+      ref: 'Lead',
+      required: requiredWhenKindIs('lead_unsubscribe_request', 'lead_id is required when kind is lead_unsubscribe_request'),
+    },
+    // The specific inbound reply whose AI classification triggered this — lets a reviewer read
+    // the actual message, not just the fact that something was classified as an unsubscribe.
+    lead_activity_id: {
+      type: Schema.Types.ObjectId,
+      ref: 'LeadActivity',
+      required: requiredWhenKindIs(
+        'lead_unsubscribe_request',
+        'lead_activity_id is required when kind is lead_unsubscribe_request',
+      ),
+    },
     status: { type: String, enum: REVIEW_TASK_STATUSES, default: 'OPEN', required: true },
     requested_by: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     reviewed_by: { type: Schema.Types.ObjectId, ref: 'User', default: null },
@@ -53,6 +69,7 @@ const reviewTaskSchema = new Schema(
 
 reviewTaskSchema.index({ org_id: 1, status: 1 });
 reviewTaskSchema.index({ domain: 1, mailbox: 1, status: 1 });
+reviewTaskSchema.index({ lead_id: 1, status: 1 });
 
 export type ReviewTaskDocument = InferSchemaType<typeof reviewTaskSchema> & { _id: Types.ObjectId };
 

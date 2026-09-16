@@ -1,5 +1,21 @@
 import { Schema, model, type InferSchemaType, type Types } from 'mongoose';
 import { LEAD_ACTIVITY_DIRECTIONS, LEAD_ACTIVITY_KINDS } from '../constants/leadActivity';
+import { REPLY_INTENTS } from '../constants/replyIntent';
+
+// Same shape/naming convention as EmailTemplateVersion's ai_generation_metadata — see
+// replyIntentClassifier.service.ts. Optional (undefined by default): only set on an inbound
+// email reply that was actually run through classification, never on outbound sends,
+// bounces/complaints, or non-email activity kinds.
+const aiReplyClassificationSchema = new Schema(
+  {
+    intent: { type: String, enum: REPLY_INTENTS, required: true },
+    confidence: { type: Number, required: true, min: 0, max: 1 },
+    reasoning: { type: String, required: true, trim: true },
+    model: { type: String, required: true },
+    classified_at: { type: Date, required: true },
+  },
+  { _id: false },
+);
 
 const leadActivitySchema = new Schema(
   {
@@ -24,6 +40,10 @@ const leadActivitySchema = new Schema(
     // back to the outbound LeadActivity it responded to.
     provider_thread_id: { type: String, trim: true },
     occurred_at: { type: Date, required: true, default: () => new Date() },
+    // AI-classified reply intent (mailboxPoller.service.ts's processCandidateReply) — a triage
+    // aid for a human, never something that drafts or sends anything on its own. See
+    // src/constants/replyIntent.ts.
+    ai_reply_classification: { type: aiReplyClassificationSchema, default: undefined },
   },
   { timestamps: true },
 );

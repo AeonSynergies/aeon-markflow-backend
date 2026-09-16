@@ -113,3 +113,36 @@ export async function enrollSavedList(templateId: string, savedListId: string): 
 
   return { enrolledCount: enrollmentIds.length, skippedCount, enrollmentIds };
 }
+
+/**
+ * Moves one enrollment out of automation — the exit-condition counterpart to
+ * processEnrollmentStepJob's own 'completed' transition (enrollmentProcessor.ts), which only
+ * ever fires when a sequence runs out of steps. This fires instead when something outside the
+ * sequence itself says it should stop early: today, an AI-classified reply (see
+ * mailboxPoller.service.ts — 'interested' exits the correlated enrollment directly,
+ * 'unsubscribe_request' exits every active enrollment for the lead via
+ * exitAllActiveEnrollmentsForLead below). Idempotent — only an `active` enrollment is exited, so
+ * calling this twice (or after the enrollment already completed on its own) is a harmless no-op.
+ * `completed_at` doubles as "ended at" here — there is no separate field for it, and both a
+ * completed and an exited enrollment equally stopped being active at that timestamp.
+ */
+export async function exitEnrollment(enrollmentId: string, exitReason: string): Promise<void> {
+  const enrollment = await Enrollment.findById(enrollmentId);
+  if (!enrollment || enrollment.status !== 'active') return;
+
+  enrollment.status = 'exited';
+  enrollment.exit_reason = exitReason;
+  enrollment.completed_at = new Date();
+  await enrollment.save();
+}
+
+/**
+ * Exits every currently-active enrollment for a lead, regardless of which one a triggering event
+ * (e.g. an unsubscribe-request reply) happened to thread against — a compliance action needs to
+ * stop every automated sequence still running for that lead, not just the one this particular
+ * reply came in on.
+ */
+export async function exitAllActiveEnrollmentsForLead(leadId: string, exitReason: string): Promise<void> {
+  const activeEnrollments = await Enrollment.find({ lead_id: leadId, status: 'active' }, '_id').lean();
+  await Promise.all(activeEnrollments.map((enrollment) => exitEnrollment(enrollment._id.toString(), exitReason)));
+}

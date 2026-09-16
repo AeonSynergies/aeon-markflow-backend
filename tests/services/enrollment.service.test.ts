@@ -1,4 +1,6 @@
-jest.mock('../../src/models/Enrollment.model', () => ({ Enrollment: { create: jest.fn() } }));
+jest.mock('../../src/models/Enrollment.model', () => ({
+  Enrollment: { create: jest.fn(), findById: jest.fn(), find: jest.fn() },
+}));
 jest.mock('../../src/models/Organization.model', () => ({ Organization: { findById: jest.fn() } }));
 jest.mock('../../src/models/SavedList.model', () => ({ SavedList: { findById: jest.fn() } }));
 jest.mock('../../src/queues/enrollmentQueue', () => ({ enqueueStepJob: jest.fn() }));
@@ -22,6 +24,8 @@ import {
   OrganizationNotFoundError,
   SavedListNotFoundError,
   enrollSavedList,
+  exitAllActiveEnrollmentsForLead,
+  exitEnrollment,
 } from '../../src/services/enrollment.service';
 import { getWorkflowTemplate } from '../../src/services/workflowTemplate.service';
 
@@ -204,5 +208,73 @@ describe('enrollment.service enrollSavedList', () => {
     (Enrollment.create as jest.Mock).mockRejectedValueOnce(new Error('mongo down'));
 
     await expect(enrollSavedList('tpl-1', 'list-1')).rejects.toThrow('mongo down');
+  });
+});
+
+describe('exitEnrollment', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  function mockActiveEnrollment(overrides: Record<string, unknown> = {}) {
+    const doc: Record<string, unknown> = { status: 'active', save: jest.fn().mockResolvedValue(undefined), ...overrides };
+    (Enrollment.findById as jest.Mock).mockResolvedValue(doc);
+    return doc;
+  }
+
+  it('exits an active enrollment, setting status, exit_reason, and completed_at', async () => {
+    const doc = mockActiveEnrollment();
+
+    await exitEnrollment('enr-1', 'reply_interested');
+
+    expect(Enrollment.findById).toHaveBeenCalledWith('enr-1');
+    expect(doc.status).toBe('exited');
+    expect(doc.exit_reason).toBe('reply_interested');
+    expect(doc.completed_at).toBeInstanceOf(Date);
+    expect(doc.save).toHaveBeenCalled();
+  });
+
+  it('no-ops when the enrollment does not exist', async () => {
+    (Enrollment.findById as jest.Mock).mockResolvedValue(null);
+    await expect(exitEnrollment('missing', 'reply_interested')).resolves.toBeUndefined();
+  });
+
+  it('no-ops (idempotent) when the enrollment is not currently active', async () => {
+    const doc = mockActiveEnrollment({ status: 'completed' });
+
+    await exitEnrollment('enr-1', 'reply_interested');
+
+    expect(doc.status).toBe('completed');
+    expect(doc.save).not.toHaveBeenCalled();
+  });
+});
+
+describe('exitAllActiveEnrollmentsForLead', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('exits every active enrollment for the lead', async () => {
+    (Enrollment.find as jest.Mock).mockReturnValue({
+      lean: jest.fn().mockResolvedValue([
+        { _id: { toString: () => 'enr-1' } },
+        { _id: { toString: () => 'enr-2' } },
+      ]),
+    });
+    const doc1 = { status: 'active', save: jest.fn().mockResolvedValue(undefined) };
+    const doc2 = { status: 'active', save: jest.fn().mockResolvedValue(undefined) };
+    (Enrollment.findById as jest.Mock).mockResolvedValueOnce(doc1).mockResolvedValueOnce(doc2);
+
+    await exitAllActiveEnrollmentsForLead('lead-1', 'unsubscribe_request');
+
+    expect(Enrollment.find).toHaveBeenCalledWith({ lead_id: 'lead-1', status: 'active' }, '_id');
+    expect(doc1.status).toBe('exited');
+    expect(doc2.status).toBe('exited');
+    expect(doc1.save).toHaveBeenCalled();
+    expect(doc2.save).toHaveBeenCalled();
+  });
+
+  it('is a no-op when the lead has no active enrollments', async () => {
+    (Enrollment.find as jest.Mock).mockReturnValue({ lean: jest.fn().mockResolvedValue([]) });
+
+    await exitAllActiveEnrollmentsForLead('lead-1', 'unsubscribe_request');
+
+    expect(Enrollment.findById).not.toHaveBeenCalled();
   });
 });

@@ -28,7 +28,9 @@ MarkFlow owns everything **before** a deal is priced: Leads, the marketing/engag
 ```
 Contact        — shared across orgs: email, phone, timezone (IANA name, nullable — send-time
                  optimization resolves to this, never the server's own timezone), firmographics
-                 (dsp_code, drivers, vans, stations), global_do_not_contact (hard suppress override)
+                 (dsp_code, drivers, vans, stations), global_do_not_contact (hard suppress override —
+                 set autonomously by an AI-classified unsubscribe_request reply, its only writer;
+                 see "AI reply-intent classification" below)
 Lead           — one per (Contact, Organization): status enum (NEW-COLD, NEW-INBOUND, CONTACTED,
                  CONTACTED-PHONE, CONTACTED-EMAIL, PROSPECT, INACTIVE, RECLAIMED), email_deliverability
                  (GOOD/LOW/BAD), phone_dnd_status, org_id, recycled_from_deal_id, lost_reason, lost_stage,
@@ -51,7 +53,10 @@ Enrollment     — Lead × WorkflowTemplate instance: current step, status (acti
                  enrollment time, same "never latest" reasoning as requires_warmup; assigned_mailboxes[]
                  { domain, mailbox } — one mailbox per distinct sending domain among its own steps,
                  assigned once at enrollment creation and reused for every send, not re-resolved per
-                 step (see "Mailbox model" below)
+                 step (see "Mailbox model" below); exit_reason/status "exited" set by
+                 exitEnrollment()/exitAllActiveEnrollmentsForLead() (enrollment.service.ts) — an
+                 interested or unsubscribe_request reply classification, today; see "AI reply-intent
+                 classification" below
 EmailTemplate  — org-scoped, ab_group_id, current_version_id
 EmailTemplateVersion — subject_line, body_html, image_blocks[] { block_id, alt_text, placeholder_src },
                  image_policy (always/never/auto — "auto" is enforced at send time by
@@ -59,8 +64,12 @@ EmailTemplateVersion — subject_line, body_html, image_blocks[] { block_id, alt
                  ai_draft_snapshot, status (DRAFT → PENDING_APPROVAL → APPROVED | REJECTED → RESUBMITTED),
                  ai_generation_metadata { reference_templates[], reason }
 ReviewTask     — auto-created when a template/workflow change (or a send-time recommendation, Phase 7)
-                 needs human approval
-LeadActivity   — kind: email | call | sms | meeting | task | note; links lead_id, workflow enrollment + step
+                 needs human approval; also auto-created as an after-the-fact record (kind
+                 lead_unsubscribe_request) when SendGuardrail-style autonomous action has already
+                 happened — not itself a pending approval gate, see "AI reply-intent classification"
+LeadActivity   — kind: email | call | sms | meeting | task | note; links lead_id, workflow enrollment + step;
+                 an inbound email reply carries ai_reply_classification { intent, confidence,
+                 reasoning, model, classified_at } once classified — see below
 SendTimePerformance — rollup: org_id, workflow_type, persona, day_of_week, hour_bucket, timezone_bucket,
                  content_variant_id, sent_count, reply_rate, meeting_rate, sample_size
 SendTimeRecommendation — a proposed or applied (day_of_week, hour_bucket, timezone_bucket,
@@ -86,6 +95,20 @@ UserAccessGrant — { user_id, app: "markflow"|"onboard", org_id (null = all org
 - **Microsoft SNDS/JMRP**: not usable — per-IP, requires registering *owned* sending IPs; MarkFlow sends via Graph/Gmail/Zoho's shared multi-tenant infrastructure, nothing to register. Only relevant if sending architecture ever moves to a dedicated IP/SMTP relay.
 
 Bounce/reply signals are fully live. Spam-complaint signal is only partial (Yahoo/AOL, once DKIM-enrolled) — don't let later phases assume Google/Microsoft complaint data exists.
+
+## AI reply-intent classification (`mailboxPoller.service.ts` / `replyIntentClassifier.service.ts`)
+
+✅ **Built.** Every inbound reply the poller correlates to a known Lead (via `provider_thread_id`, falling back to sender-address matching — see above) is classified by Claude (`claude-opus-5`) into `interested` | `not_now` | `objection` | `wrong_person` | `unsubscribe_request` | `unclear`, with a confidence score and one-sentence reasoning, stored on the `LeadActivity` record (`ai_reply_classification`). Below `LOW_CONFIDENCE_THRESHOLD` (`src/constants/replyIntent.ts` — a proposed default, unreviewed), the result is downgraded to `unclear` regardless of what Claude said, so a human is never misled by a shaky label. A classification failure (API outage, malformed response) never blocks the reply pipeline itself — it falls back to `unclear` and the reply is still logged/counted either way.
+
+This is a triage aid, not a content generator — it never drafts or sends anything on its own; a human still drafts any actual reply through the existing AI-template-assistant/approval flow. Two classifications drive further, narrowly-scoped autonomous action instead of just sitting on the record:
+
+- **`unsubscribe_request`** sets `Contact.global_do_not_contact` and exits every active `Enrollment` for that lead (`exitAllActiveEnrollmentsForLead`) — the same human-in-the-loop exception as SendGuardrail's autonomous domain pause (a compliance/safety action, not a content/strategy judgment call), so it takes effect immediately. Mirrors `pauseDomain`'s own shape: mutate state, open a `ReviewTask` (`lead_unsubscribe_request` kind — a record for a human to review, not a pending approval gate), send an internal notification. Idempotent.
+- **`interested`** exits the correlated `Enrollment` (`exitEnrollment`, reason `reply_interested`) — consistent with the Aeon Miles playbook's own instruction to move an interested lead out of automation immediately. A workflow-state transition, not content generation, so — like the engine's own existing autonomous "no more steps → completed" transition — it isn't gated behind human approval.
+
+⚠️ **Two things worth flagging, found while building this:**
+- `Contact.global_do_not_contact` had no writer *or* reader anywhere in this codebase before this change. Exiting every currently-active enrollment is what actually guarantees no more automated sends go out to a newly-suppressed contact today — the flag alone stops nothing, since nothing reads it. Gating `enrollSavedList`/`sendWorkflowEmail` on it too (so a *future* enrollment attempt also respects it) would be a reasonable follow-up; not attempted here — out of scope for the reply-classification wiring this was asked to build.
+- `exitEnrollment`/`exitAllActiveEnrollmentsForLead` (`enrollment.service.ts`) are themselves new. `Enrollment.exit_reason`/`status: "exited"` have existed in the schema since Phase 4, and this file previously said exit-condition logic was "already built into the human playbook" — that referred to the uploaded seed *business* playbook documents, not existing MarkFlow code; no service anywhere actually moved an enrollment to `exited` before this.
+- No read API yet: `ai_reply_classification` is stored and queryable in Mongo, but this backend has no `Lead`/`LeadActivity` HTTP routes at all (same gap as `Organization` — see "Domain purpose model" below) — nothing in-app surfaces a classified reply to a human yet. That's frontend-adjacent, separate-repo work, or a new route domain neither asked for nor attempted here.
 
 ## Domain purpose model — `Organization.sending_domains[]`
 
@@ -175,7 +198,7 @@ DKIM setup continues regardless (valuable for deliverability to every provider).
 ## The three things that must never be violated
 
 1. **"Response rate" means reply rate / meeting-booked, never open rate**, anywhere in analytics or optimization logic. Opens are unreliable (Apple MPP, Gmail proxy caching).
-2. **Human-in-the-loop gates are real gates**: AI-generated template content and AI-suggested workflow/optimization changes sit in `DRAFT`/`PENDING_APPROVAL` until a human with the right role approves — never auto-applied. Exception: sending guardrails (domain warmup/throttling) can act autonomously — safety mechanism, not a content/strategy judgment call.
+2. **Human-in-the-loop gates are real gates**: AI-generated template content and AI-suggested workflow/optimization changes sit in `DRAFT`/`PENDING_APPROVAL` until a human with the right role approves — never auto-applied. Exception: safety/compliance mechanisms, not content/strategy judgment calls, can act autonomously — sending guardrails (domain warmup/throttling) and AI-classified unsubscribe-request handling (contact suppression + enrollment exit) both do, and both still leave a `ReviewTask` + internal notification behind so a human sees it happened.
 3. **A `WorkflowStep` pins to a specific `email_template_version_id`, never "latest."** Editing a template must never silently change a sequence already enrolling leads.
 
 ## RBAC, condensed
