@@ -1,4 +1,6 @@
+import { Contact } from '../models/Contact.model';
 import { Enrollment } from '../models/Enrollment.model';
+import { Lead } from '../models/Lead.model';
 import { Organization } from '../models/Organization.model';
 import { SavedList } from '../models/SavedList.model';
 import { enqueueStepJob } from '../queues/enrollmentQueue';
@@ -35,14 +37,37 @@ export class OrganizationNotFoundError extends Error {
   }
 }
 
+export interface EnrollmentRejection {
+  leadId: string;
+  reason: string;
+}
+
 export interface EnrollSavedListResult {
   enrolledCount: number;
   skippedCount: number;
   enrollmentIds: string[];
+  rejections: EnrollmentRejection[];
 }
 
 function isDuplicateKeyError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { code?: number }).code === 11000;
+}
+
+/**
+ * True only when the lead's own Contact positively confirms global_do_not_contact — an explicit
+ * opt-out that overrides any other state, including "eligible for re-engagement" (there is no
+ * separate recycle/win-back enrollment path in this codebase; every enrollment, recycled leads
+ * included, goes through enrollSavedList, so this one check covers all of them). Fails open (does
+ * NOT report suppression) when the Lead or Contact can't be found, matching this function's
+ * pre-existing behavior of trusting `savedList.lead_ids` without validating each id resolves to a
+ * real Lead — not something this change is trying to fix.
+ */
+async function isContactSuppressed(leadId: string): Promise<boolean> {
+  const lead = await Lead.findById(leadId).lean();
+  if (!lead) return false;
+
+  const contact = await Contact.findById(lead.contact_id).lean();
+  return contact?.global_do_not_contact ?? false;
 }
 
 /**
@@ -52,6 +77,10 @@ function isDuplicateKeyError(error: unknown): boolean {
  * here, then reused for every send in the sequence rather than re-resolved per step), and the
  * first step's job enqueued immediately. A lead already actively enrolled in this same template
  * is skipped rather than erroring the whole batch (enforced by Enrollment's partial unique index).
+ * A lead whose Contact has opted out (global_do_not_contact) is rejected outright instead —
+ * reported back in `rejections`, not silently dropped, so whoever requested the enrollment knows
+ * why it didn't happen — rather than either being skipped indistinguishably from a duplicate or
+ * created anyway.
  */
 export async function enrollSavedList(templateId: string, savedListId: string): Promise<EnrollSavedListResult> {
   const template = await getWorkflowTemplate(templateId);
@@ -70,10 +99,20 @@ export async function enrollSavedList(templateId: string, savedListId: string): 
   if (!org) throw new OrganizationNotFoundError(template.org_id.toString());
 
   const enrollmentIds: string[] = [];
+  const rejections: EnrollmentRejection[] = [];
   let skippedCount = 0;
 
-  for (const leadId of savedList.lead_ids) {
+  for (const rawLeadId of savedList.lead_ids) {
+    const leadId = rawLeadId.toString();
     try {
+      if (await isContactSuppressed(leadId)) {
+        rejections.push({
+          leadId,
+          reason: 'Contact has opted out (global_do_not_contact) — overrides any eligible-for-re-engagement state',
+        });
+        continue;
+      }
+
       // Resolved independently per lead: an A/B group's traffic split is a per-enrollment coin
       // flip, not a batch-wide choice (see abTesting.service.ts's own doc comment). Converted to
       // plain objects first — resolveStepForEnrollment takes the API-shaped WorkflowStepInput,
@@ -111,7 +150,7 @@ export async function enrollSavedList(templateId: string, savedListId: string): 
     }
   }
 
-  return { enrolledCount: enrollmentIds.length, skippedCount, enrollmentIds };
+  return { enrolledCount: enrollmentIds.length, skippedCount, enrollmentIds, rejections };
 }
 
 /**

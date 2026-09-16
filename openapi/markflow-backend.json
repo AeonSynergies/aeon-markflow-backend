@@ -182,6 +182,23 @@
             "items": {
               "type": "string"
             }
+          },
+          "rejected_count": {
+            "type": "integer"
+          },
+          "rejections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "lead_id": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },

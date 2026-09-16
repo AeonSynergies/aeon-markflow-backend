@@ -86,6 +86,17 @@ export function buildOpenApiSpec(): object {
               enrolled_count: { type: 'integer' },
               skipped_count: { type: 'integer' },
               enrollment_ids: { type: 'array', items: { type: 'string' } },
+              rejected_count: { type: 'integer' },
+              rejections: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    lead_id: { type: 'string' },
+                    reason: { type: 'string' },
+                  },
+                },
+              },
             },
           },
           ErrorResponse: {
