@@ -8,7 +8,14 @@ jest.mock('../../src/services/emailTemplate.service', () => ({
 jest.mock('../../src/services/emailTemplateVersion.service', () => ({
   EmailTemplateNotFoundError: jest.requireActual('../../src/services/emailTemplateVersion.service')
     .EmailTemplateNotFoundError,
+  EmailTemplateVersionNotFoundError: jest.requireActual('../../src/services/emailTemplateVersion.service')
+    .EmailTemplateVersionNotFoundError,
   listEmailTemplateVersions: jest.fn(),
+  getEmailTemplateVersion: jest.fn(),
+  approveVersion: jest.fn(),
+  rejectVersion: jest.fn(),
+  resubmitVersion: jest.fn(),
+  submitForReview: jest.fn(),
 }));
 
 import {
@@ -18,12 +25,21 @@ import {
 } from '../../src/services/emailTemplate.service';
 import {
   EmailTemplateNotFoundError,
+  EmailTemplateVersionNotFoundError,
   listEmailTemplateVersions,
+  getEmailTemplateVersion,
+  approveVersion,
+  rejectVersion,
+  resubmitVersion,
+  submitForReview,
 } from '../../src/services/emailTemplateVersion.service';
 import {
   listEmailTemplateUsagesHandler,
   listEmailTemplateVersionsHandler,
   listEmailTemplatesHandler,
+  approveEmailTemplateVersionHandler,
+  rejectEmailTemplateVersionHandler,
+  resubmitEmailTemplateVersionHandler,
 } from '../../src/routes/emailTemplate.routes';
 
 function mockRes() {
@@ -205,6 +221,153 @@ describe('emailTemplate.routes handlers', () => {
       await listEmailTemplateVersionsHandler(req, res, jest.fn());
 
       expect(listEmailTemplateVersions).toHaveBeenCalledWith('tpl-1', undefined);
+    });
+  });
+
+  function versionReq(overrides: Record<string, unknown> = {}) {
+    return {
+      params: { orgId: 'org-1', templateId: 'tpl-1', versionId: 'ver-1' },
+      query: {},
+      body: {},
+      user: { id: 'user-1' },
+      orgAccess: { roles: ['BD_MANAGER'] },
+      ...overrides,
+    } as unknown as Request;
+  }
+
+  describe('approveEmailTemplateVersionHandler', () => {
+    it('404s (via next) when the version belongs to a different template', async () => {
+      (getEmailTemplate as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'tpl-1' },
+        org_id: { toString: () => 'org-1' },
+      });
+      (getEmailTemplateVersion as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'ver-1' },
+        email_template_id: { toString: () => 'tpl-2' },
+      });
+      const req = versionReq();
+      const next = jest.fn();
+
+      await approveEmailTemplateVersionHandler(req, mockRes(), next);
+
+      expect(next).toHaveBeenCalledWith(expect.any(EmailTemplateVersionNotFoundError));
+      expect(approveVersion).not.toHaveBeenCalled();
+    });
+
+    it('approves using a role picked from the caller\'s TEMPLATE_APPROVER_ROLES-qualifying roles', async () => {
+      (getEmailTemplate as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'tpl-1' },
+        org_id: { toString: () => 'org-1' },
+      });
+      (getEmailTemplateVersion as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'ver-1' },
+        email_template_id: { toString: () => 'tpl-1' },
+      });
+      (approveVersion as jest.Mock).mockResolvedValue({ _id: 'ver-1', status: 'APPROVED' });
+      const res = mockRes();
+
+      await approveEmailTemplateVersionHandler(versionReq({ orgAccess: { roles: ['BD_LEAD_GEN', 'BD_MANAGER'] } }), res, jest.fn());
+
+      expect(approveVersion).toHaveBeenCalledWith('ver-1', 'user-1', 'BD_MANAGER');
+      expect(res.json).toHaveBeenCalledWith({ _id: 'ver-1', status: 'APPROVED' });
+    });
+  });
+
+  describe('rejectEmailTemplateVersionHandler', () => {
+    it('responds 400 without calling rejectVersion when reason is missing', async () => {
+      (getEmailTemplate as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'tpl-1' },
+        org_id: { toString: () => 'org-1' },
+      });
+      (getEmailTemplateVersion as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'ver-1' },
+        email_template_id: { toString: () => 'tpl-1' },
+      });
+      const res = mockRes();
+
+      await rejectEmailTemplateVersionHandler(versionReq({ body: {} }), res, jest.fn());
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(rejectVersion).not.toHaveBeenCalled();
+    });
+
+    it('responds 400 when reason is only whitespace', async () => {
+      (getEmailTemplate as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'tpl-1' },
+        org_id: { toString: () => 'org-1' },
+      });
+      (getEmailTemplateVersion as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'ver-1' },
+        email_template_id: { toString: () => 'tpl-1' },
+      });
+      const res = mockRes();
+
+      await rejectEmailTemplateVersionHandler(versionReq({ body: { reason: '   ' } }), res, jest.fn());
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(rejectVersion).not.toHaveBeenCalled();
+    });
+
+    it('rejects with the trimmed reason and the picked approver role', async () => {
+      (getEmailTemplate as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'tpl-1' },
+        org_id: { toString: () => 'org-1' },
+      });
+      (getEmailTemplateVersion as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'ver-1' },
+        email_template_id: { toString: () => 'tpl-1' },
+      });
+      (rejectVersion as jest.Mock).mockResolvedValue({ _id: 'ver-1', status: 'REJECTED' });
+      const res = mockRes();
+
+      await rejectEmailTemplateVersionHandler(versionReq({ body: { reason: '  too generic  ' } }), res, jest.fn());
+
+      expect(rejectVersion).toHaveBeenCalledWith('ver-1', 'user-1', 'BD_MANAGER', 'too generic');
+      expect(res.json).toHaveBeenCalledWith({ _id: 'ver-1', status: 'REJECTED' });
+    });
+  });
+
+  describe('resubmitEmailTemplateVersionHandler', () => {
+    it('404s (via next) when the version belongs to a different template', async () => {
+      (getEmailTemplate as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'tpl-1' },
+        org_id: { toString: () => 'org-1' },
+      });
+      (getEmailTemplateVersion as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'ver-1' },
+        email_template_id: { toString: () => 'tpl-2' },
+      });
+      const next = jest.fn();
+
+      await resubmitEmailTemplateVersionHandler(versionReq(), mockRes(), next);
+
+      expect(next).toHaveBeenCalledWith(expect.any(EmailTemplateVersionNotFoundError));
+      expect(resubmitVersion).not.toHaveBeenCalled();
+      expect(submitForReview).not.toHaveBeenCalled();
+    });
+
+    it('chains resubmitVersion then submitForReview and returns the resubmitted version', async () => {
+      (getEmailTemplate as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'tpl-1' },
+        org_id: { toString: () => 'org-1' },
+      });
+      (getEmailTemplateVersion as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'ver-1' },
+        email_template_id: { toString: () => 'tpl-1' },
+      });
+      (resubmitVersion as jest.Mock).mockResolvedValue({ _id: 'ver-1', status: 'RESUBMITTED' });
+      (submitForReview as jest.Mock).mockResolvedValue({ _id: 'ver-1', status: 'PENDING_APPROVAL' });
+      const res = mockRes();
+
+      await resubmitEmailTemplateVersionHandler(
+        versionReq({ body: { subject_line: 'New subject' } }),
+        res,
+        jest.fn(),
+      );
+
+      expect(resubmitVersion).toHaveBeenCalledWith('ver-1', { subjectLine: 'New subject', bodyHtml: undefined });
+      expect(submitForReview).toHaveBeenCalledWith('ver-1', 'user-1');
+      expect(res.json).toHaveBeenCalledWith({ _id: 'ver-1', status: 'PENDING_APPROVAL' });
     });
   });
 });

@@ -16,10 +16,12 @@ import { ReviewTask } from '../../src/models/ReviewTask.model';
 import { generateEmailDraft } from '../../src/services/emailGeneration.service';
 import { sendInternalNotification } from '../../src/services/internalNotification.service';
 import {
+  EmailTemplateVersionNotFoundError,
   InvalidTemplateVersionTransitionError,
   UnauthorizedApproverRoleError,
   approveVersion,
   createAiDraftVersion,
+  getEmailTemplateVersion,
   rejectVersion,
   resubmitVersion,
   submitForReview,
@@ -191,6 +193,18 @@ describe('emailTemplateVersion.service', () => {
     it('rejects resubmitting a DRAFT version', async () => {
       mockVersion({ status: 'DRAFT' });
       await expect(resubmitVersion('ver-1')).rejects.toThrow(InvalidTemplateVersionTransitionError);
+    });
+  });
+
+  describe('getEmailTemplateVersion', () => {
+    it('returns the version when found', async () => {
+      const version = mockVersion();
+      await expect(getEmailTemplateVersion('ver-1')).resolves.toBe(version);
+    });
+
+    it('throws EmailTemplateVersionNotFoundError when missing', async () => {
+      (EmailTemplateVersion.findById as jest.Mock).mockResolvedValue(null);
+      await expect(getEmailTemplateVersion('ver-1')).rejects.toThrow(EmailTemplateVersionNotFoundError);
     });
   });
 });

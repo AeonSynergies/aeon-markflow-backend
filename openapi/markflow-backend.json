@@ -476,6 +476,106 @@
           }
         }
       },
+      "RejectEmailTemplateVersionRequest": {
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "ResubmitEmailTemplateVersionRequest": {
+        "type": "object",
+        "properties": {
+          "subject_line": {
+            "type": "string"
+          },
+          "body_html": {
+            "type": "string"
+          }
+        }
+      },
+      "ReviewTaskResponse": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "email_template_version",
+              "domain_guardrail",
+              "email_version_deliverability",
+              "send_time_recommendation",
+              "lead_unsubscribe_request"
+            ]
+          },
+          "email_template_version_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "domain": {
+            "type": "string",
+            "nullable": true
+          },
+          "mailbox": {
+            "type": "string",
+            "nullable": true
+          },
+          "send_time_recommendation_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "lead_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "lead_activity_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "APPROVED",
+              "REJECTED"
+            ]
+          },
+          "requested_by": {
+            "type": "string",
+            "nullable": true
+          },
+          "reviewed_by": {
+            "type": "string",
+            "nullable": true
+          },
+          "reviewed_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "rejection_reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "CrossOrgInsightResponse": {
         "type": "object",
         "properties": {
@@ -1376,6 +1476,68 @@
         }
       }
     },
+    "/orgs/{orgId}/review-tasks": {
+      "get": {
+        "summary": "List an org's ReviewTasks",
+        "description": "Defaults to status=OPEN — the actionable queue. ReviewTask is generic across five kinds (email_template_version, domain_guardrail, email_version_deliverability, send_time_recommendation, lead_unsubscribe_request); pass kind to narrow to one. This is what lets a Template Review queue UI list open email_template_version tasks directly, instead of inferring \"pending\" purely from EmailTemplate/EmailTemplateVersion status.\n",
+        "tags": [
+          "EmailTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "OPEN",
+                "APPROVED",
+                "REJECTED"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "email_template_version",
+                "domain_guardrail",
+                "email_version_deliverability",
+                "send_time_recommendation",
+                "lead_unsubscribe_request"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ReviewTaskResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/orgs/{orgId}/organization": {
       "get": {
         "summary": "Get an org's configuration (Settings screen)",
@@ -1852,6 +2014,191 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/email-templates/{templateId}/versions/{versionId}/approve": {
+      "post": {
+        "summary": "Approve a PENDING_APPROVAL email template version",
+        "description": "Transitions the version to APPROVED, sets it as the parent EmailTemplate's current_version_id, and closes (status: APPROVED) the ReviewTask opened when it was submitted for review. Gated to TEMPLATE_APPROVER_ROLES (SUPER_ADMIN, ADMIN, BD_MANAGER, BD_SALES) — this is the same, already-finalized role set `resumeDomain` on SendGuardrail reuses for its own \"human signed off\" gate; it does not include BD_ADMIN.\n",
+        "tags": [
+          "EmailTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "versionId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailTemplateVersionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Version is not in a state that can transition to APPROVED"
+          },
+          "403": {
+            "description": "Caller's role is not authorized to approve"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/email-templates/{templateId}/versions/{versionId}/reject": {
+      "post": {
+        "summary": "Reject a PENDING_APPROVAL email template version",
+        "description": "Transitions the version to REJECTED and closes (status: REJECTED) the associated ReviewTask, recording the given reason on it. Gated to TEMPLATE_APPROVER_ROLES, same as approve.\n",
+        "tags": [
+          "EmailTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "versionId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectEmailTemplateVersionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailTemplateVersionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing reason, or version is not in a state that can transition to REJECTED"
+          },
+          "403": {
+            "description": "Caller's role is not authorized to reject"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/email-templates/{templateId}/versions/{versionId}/resubmit": {
+      "post": {
+        "summary": "Resubmit a REJECTED email template version for another review pass",
+        "description": "Applies optional edits, moves the version REJECTED -> RESUBMITTED, then immediately submits it for review again (RESUBMITTED -> PENDING_APPROVAL), opening a fresh ReviewTask — resubmitVersion alone would leave nothing actionable for a reviewer. Gated to WORKFLOW_ACCESS_ROLES (the same role set that can view/act on templates generally), not TEMPLATE_APPROVER_ROLES — resubmitting is the original author's action, not a reviewer's.\n",
+        "tags": [
+          "EmailTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "versionId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResubmitEmailTemplateVersionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailTemplateVersionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Version is not in a state that can be resubmitted"
           },
           "404": {
             "description": "Not found"

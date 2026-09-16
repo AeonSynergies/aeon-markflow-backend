@@ -40,3 +40,13 @@ export interface EmailTemplateVersionResponse {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface RejectEmailTemplateVersionRequest {
+  reason: string;
+}
+
+/** Both optional — resubmitting without edits (e.g. after a purely external fix) is valid. */
+export interface ResubmitEmailTemplateVersionRequest {
+  subject_line?: string;
+  body_html?: string;
+}
