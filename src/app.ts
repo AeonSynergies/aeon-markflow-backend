@@ -8,6 +8,7 @@ import { emailTemplateRouter } from './routes/emailTemplate.routes';
 import { guardrailSettingsRouter } from './routes/guardrailSettings.routes';
 import { leadRouter } from './routes/lead.routes';
 import { organizationSettingsRouter } from './routes/organizationSettings.routes';
+import { reviewTaskRouter } from './routes/reviewTask.routes';
 import { savedListRouter } from './routes/savedList.routes';
 import { trackingRouter } from './routes/tracking.routes';
 import { userAccessGrantRouter } from './routes/userAccessGrant.routes';
@@ -31,6 +32,7 @@ export function createApp(): Express {
   app.use(trackingRouter);
   app.use(workflowTemplateRouter);
   app.use(emailTemplateRouter);
+  app.use(reviewTaskRouter);
   app.use(crossOrgInsightRouter);
   app.use(leadRouter);
   app.use(savedListRouter);

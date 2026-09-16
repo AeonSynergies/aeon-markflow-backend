@@ -201,6 +201,19 @@ Recipients default to the mailbox itself (a shared inbox a team monitors togethe
 
 ⚠️ **Manual step before relying on this in production**: confirm the `notifications@aeonsynergies.com` shared mailbox actually exists in the Aeon Synergies M365 tenant, and that the existing Graph app registration's Mail.Send permission covers it (if an Exchange Application Access Policy scopes that app to specific mailboxes, add this one). Not something this codebase can verify or provision itself — an ops task. Until confirmed, sends fail silently (logged, not thrown) rather than blocking the ReviewTask/pause they're attached to.
 
+## Template review actions — approve/reject/resubmit, and listing open ReviewTasks — built
+
+✅ **Done.** Until this work, `PENDING_APPROVAL` `EmailTemplateVersion`s had no HTTP-reachable way to be acted on at all — `approveVersion`/`rejectVersion`/`resubmitVersion` existed and were fully tested at the service layer, but nothing routed to them, and the frontend's Template Review queue (`aeon-markflow`) was read-only for exactly that reason. Added:
+
+- `POST /orgs/{orgId}/email-templates/{templateId}/versions/{versionId}/approve` — `PENDING_APPROVAL` → `APPROVED`, sets `EmailTemplate.current_version_id`, closes the open `ReviewTask` (`status: APPROVED`). Gated `TEMPLATE_APPROVER_ROLES` (see the RBAC correction above).
+- `.../reject` — `PENDING_APPROVAL` → `REJECTED`, requires a non-blank `reason` in the body (400 without one), closes the `ReviewTask` with that reason recorded. Same gate.
+- `.../resubmit` — chains `resubmitVersion` (`REJECTED` → `RESUBMITTED`, applying optional edits) with `submitForReview` (→ `PENDING_APPROVAL`, opens a fresh `ReviewTask`) into one call, since `resubmitVersion` alone leaves nothing for a reviewer to act on. Gated `WORKFLOW_ACCESS_ROLES`, not `TEMPLATE_APPROVER_ROLES` — resubmitting is the original author's move, not a reviewer's.
+- `GET /orgs/{orgId}/review-tasks` (new `reviewTask.routes.ts`/`.service.ts`) — lists a org's `ReviewTask`s, defaulting to `status=OPEN`, with optional `status`/`kind` filters. Gated `WORKFLOW_ACCESS_ROLES`. This is what lets a Review queue UI list what's actually open directly, instead of inferring "pending" from `EmailTemplateVersion.status` alone.
+
+**Deliberate path deviation**: nested all four under the existing `/orgs/{orgId}/email-templates/{templateId}/versions/{versionId}/...` sub-resource (reusing `resolveVersionForOrg`'s existing not-found-not-forbidden masking) rather than the unscoped `/email-template-versions/:id/...` shape floated when this was requested — every other resource in this API is org-scoped in its path, and an unscoped version route would be the only exception.
+
+**Still open, out of scope here**: `submitForReview`'s *other* call site — the original `DRAFT` → `PENDING_APPROVAL` submission after `createAiDraftVersion` — still has no HTTP route. The whole AI-draft-creation flow (`createAiDraftVersion` itself included) has never been exposed over HTTP; this task only wired up the review-decision side of an already-submitted version.
+
 ## Go-live status: send-time/content-pattern optimization (Phase 7)
 
 ✅ **Built.** `sendTimePerformance.service.ts`'s `computeSendTimeRollups()` recomputes every `SendTimePerformance` bucket on a rolling basis (last `SEND_TIME_ROLLUP_LOOKBACK_DAYS`, not all-time) from `EmailEngagement` rows — each send is bucketed by the **recipient's own local** day-of-week/hour (via `Contact.timezone`, falling back to UTC when unknown — never the server's timezone; see `src/utils/timezone.ts`). Target metric is reply rate / meeting-booked, same as everywhere else — **never open rate**. `sendTimeOptimization.service.ts`'s `runSendTimeOptimization()` (scheduled daily by `sendTimePerformanceQueue.ts`/`Worker.ts`, also callable on demand) then evaluates every (org, workflow_type, persona) group belonging to an org whose `send_time_strategy` isn't `"manual"`:
@@ -281,6 +294,8 @@ Recycled/Win-back lead segment visible to: BD-Sales, BD-Manager, Admin only.
 Raw cross-org insight data (`GET /cross-org-insights/raw`, Phase 8) visible to: Super Admin, Admin only — see `ADMIN_ONLY_ROLES`. Everyone with workflow access still sees the generic, coarse-labeled recommendations at `GET /cross-org-insights`.
 
 Org-level configuration — `Organization` settings, `UserAccessGrant` management, `GuardrailSettings`, Brand Voice guidelines — visible/editable to: Super Admin, Admin only (`ADMIN_ONLY_ROLES`, same set as raw cross-org insight data). This is a new rule as of the Settings screen backend, not something CLAUDE.md documented before it: only Admin/Super Admin may grant or edit `UserAccessGrant`s at all, which is stricter than `WORKFLOW_ACCESS_ROLES` (BD Admin/BD Manager/BD Sales included there have no access to any of this). See "Settings screen backend" below.
+
+Who may approve/reject an `EmailTemplateVersion` — `TEMPLATE_APPROVER_ROLES` (`src/constants/emailTemplate.ts`) — is **Super Admin, Admin, BD Manager, BD-Sales**. Flagging this explicitly: a request for this work described the intended governance as "BD Admin/BD Manager," which doesn't match — the actual, already-finalized set (predates this work; also reused by `SendGuardrail.resumeDomain`'s own "human signed off" gate) includes BD-Sales and excludes BD Admin. Used the real constant, not the guessed one. This table row didn't exist before either — same gap the Settings-screen row above already called out for `ADMIN_ONLY_ROLES`.
 
 ## Integration points and current status
 

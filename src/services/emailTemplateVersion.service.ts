@@ -55,6 +55,12 @@ async function nextVersionNumber(emailTemplateId: string): Promise<number> {
   return count + 1;
 }
 
+export async function getEmailTemplateVersion(versionId: string): Promise<EmailTemplateVersionDocument> {
+  const version = await EmailTemplateVersion.findById(versionId);
+  if (!version) throw new EmailTemplateVersionNotFoundError(versionId);
+  return version;
+}
+
 /**
  * Lists an EmailTemplate's versions, newest first. Callers building a workflow step picker
  * should pass status: 'APPROVED' — a WorkflowStep pins to a specific version id, never
