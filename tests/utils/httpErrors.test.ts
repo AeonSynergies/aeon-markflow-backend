@@ -11,6 +11,23 @@ describe('statusForError', () => {
     expect(statusForError(new WorkflowTemplateNotFoundError())).toBe(404);
   });
 
+  it('maps OrganizationNotFoundError and UserAccessGrantNotFoundError to 404', () => {
+    class OrganizationNotFoundError extends Error {
+      constructor() {
+        super('nope');
+        this.name = 'OrganizationNotFoundError';
+      }
+    }
+    class UserAccessGrantNotFoundError extends Error {
+      constructor() {
+        super('nope');
+        this.name = 'UserAccessGrantNotFoundError';
+      }
+    }
+    expect(statusForError(new OrganizationNotFoundError())).toBe(404);
+    expect(statusForError(new UserAccessGrantNotFoundError())).toBe(404);
+  });
+
   it('maps Mongoose ValidationError and CastError to 400', () => {
     const validationError = Object.assign(new Error('bad'), { name: 'ValidationError' });
     const castError = Object.assign(new Error('bad id'), { name: 'CastError' });

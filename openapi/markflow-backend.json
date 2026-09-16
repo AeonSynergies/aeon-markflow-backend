@@ -549,6 +549,361 @@
             }
           }
         ]
+      },
+      "SenderMailboxInput": {
+        "type": "object",
+        "required": [
+          "address"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "inactive"
+            ]
+          }
+        }
+      },
+      "SendingDomainInput": {
+        "type": "object",
+        "required": [
+          "domain",
+          "purpose"
+        ],
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "marketing",
+              "transactional",
+              "alerts"
+            ]
+          },
+          "mailboxes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SenderMailboxInput"
+            }
+          }
+        }
+      },
+      "UpdateOrganizationSettingsRequest": {
+        "type": "object",
+        "properties": {
+          "enabled_features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sending_domains": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SendingDomainInput"
+            }
+          },
+          "send_time_strategy": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "ai_suggested",
+              "ai_automatic"
+            ]
+          }
+        }
+      },
+      "SendingDomainResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SendingDomainInput"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mailboxes": {
+                "type": "array",
+                "items": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SenderMailboxInput"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "active",
+                            "inactive"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "OrganizationSettingsResponse": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled_features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "product_context": {
+            "type": "string"
+          },
+          "brand_voice_guidelines_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "sending_domains": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SendingDomainResponse"
+            }
+          },
+          "send_time_strategy": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "ai_suggested",
+              "ai_automatic"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreateUserAccessGrantRequest": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "app",
+          "role"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "string"
+          },
+          "app": {
+            "type": "string",
+            "enum": [
+              "markflow",
+              "onboard"
+            ]
+          },
+          "org_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Omit to default to the URL org id; null means all orgs."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "SUPER_ADMIN",
+              "ADMIN",
+              "BD_ADMIN",
+              "BD_MANAGER",
+              "BD_LEAD_GEN",
+              "BD_SALES"
+            ]
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "UpdateUserAccessGrantRequest": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "SUPER_ADMIN",
+              "ADMIN",
+              "BD_ADMIN",
+              "BD_MANAGER",
+              "BD_LEAD_GEN",
+              "BD_SALES"
+            ]
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "UserAccessGrantResponse": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "user_email": {
+            "type": "string",
+            "nullable": true
+          },
+          "app": {
+            "type": "string",
+            "enum": [
+              "markflow",
+              "onboard"
+            ]
+          },
+          "org_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "SUPER_ADMIN",
+              "ADMIN",
+              "BD_ADMIN",
+              "BD_MANAGER",
+              "BD_LEAD_GEN",
+              "BD_SALES"
+            ]
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "UpsertGuardrailSettingsRequest": {
+        "type": "object",
+        "properties": {
+          "ramp_up_starting_daily_cap": {
+            "type": "number"
+          },
+          "ramp_up_step_multiplier": {
+            "type": "number"
+          },
+          "ramp_up_step_interval_days": {
+            "type": "number"
+          },
+          "ramp_up_steady_state_daily_cap": {
+            "type": "number"
+          },
+          "guardrail_short_window_hours": {
+            "type": "number"
+          },
+          "guardrail_long_window_days": {
+            "type": "number"
+          },
+          "guardrail_min_sample_size": {
+            "type": "number"
+          },
+          "throttle_bounce_rate": {
+            "type": "number"
+          },
+          "throttle_complaint_rate": {
+            "type": "number"
+          },
+          "hard_stop_bounce_rate": {
+            "type": "number"
+          },
+          "hard_stop_complaint_rate": {
+            "type": "number"
+          }
+        }
+      },
+      "GuardrailSettingsResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/UpsertGuardrailSettingsRequest"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "org_id": {
+                "type": "string"
+              },
+              "domain": {
+                "type": "string"
+              },
+              "has_override": {
+                "type": "boolean"
+              },
+              "overridden_fields": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "UpdateBrandVoiceGuidelinesRequest": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "BrandVoiceGuidelinesResponse": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
       }
     }
   },
@@ -769,6 +1124,134 @@
         }
       }
     },
+    "/orgs/{orgId}/user-access-grants": {
+      "get": {
+        "summary": "List UserAccessGrants relevant to an org (scoped to it, plus any all-orgs grant)",
+        "description": "Admin/Super Admin only — only Admin/Super Admin can view or manage access grants, per the RBAC table.",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UserAccessGrantResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a UserAccessGrant",
+        "description": "Admin/Super Admin only. org_id defaults to the URL's orgId when omitted; passing org_id explicitly as null (all orgs) or as a different org requires the caller to already hold access to that wider or different scope themselves — a grant can never exceed the caller's own access.\n",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserAccessGrantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserAccessGrantResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The requested org_id scope exceeds the caller's own access"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/user-access-grants/{grantId}": {
+      "patch": {
+        "summary": "Update a UserAccessGrant's role and/or features",
+        "description": "Admin/Super Admin only. app, org_id, and user_id are immutable after creation — the model's own unique index is on that exact triple, so changing any of them is really a different grant.\n",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "grantId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserAccessGrantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserAccessGrantResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
     "/orgs/{orgId}/saved-lists": {
       "post": {
         "summary": "Create a SavedList, optionally seeded with a bulk lead selection",
@@ -893,6 +1376,85 @@
         }
       }
     },
+    "/orgs/{orgId}/organization": {
+      "get": {
+        "summary": "Get an org's configuration (Settings screen)",
+        "description": "Admin/Super Admin only, per the RBAC table's treatment of org-level configuration.",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationSettingsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update an org's enabled_features, sending_domains, and/or send_time_strategy",
+        "description": "Admin/Super Admin only. sending_domains, if given, fully replaces the array — same full-replace semantics as a WorkflowTemplate's own `steps` field, not a merge. Does not touch name, product_context, or brand_voice_guidelines_id.\n",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOrganizationSettingsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationSettingsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error (e.g. an unknown sending_domains purpose)"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
     "/orgs/{orgId}/leads": {
       "get": {
         "summary": "List/filter/search Leads for an org",
@@ -965,6 +1527,155 @@
           },
           "403": {
             "description": "segment=recycled requested by a role outside RECYCLED_SEGMENT_ROLES"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/guardrail-settings": {
+      "get": {
+        "summary": "List SendGuardrail settings for every one of an org's configured sending domains",
+        "description": "Admin/Super Admin only. One row per Organization.sending_domains[] entry, each showing the currently *effective* values (a per-domain override merged over the hardcoded defaults in src/constants/sendGuardrail.ts) plus which fields, if any, are overridden.\n",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GuardrailSettingsResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/guardrail-settings/{domain}": {
+      "get": {
+        "summary": "Get the effective SendGuardrail settings for one (org, domain) pair",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "domain",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK — always 200, even with no override (returns the hardcoded defaults)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailSettingsResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Upsert a per-(org, domain) override of SendGuardrail's ramp-up numbers/thresholds",
+        "description": "Admin/Super Admin only. Only the fields present in the body are written — a field left out keeps its previously-stored value (or stays unset/default), the same partial-PATCH semantics as everywhere else in this codebase. Takes effect on the very next canSend() check; nothing needs a restart or redeploy.\n",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "domain",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertGuardrailSettingsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailSettingsResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove the override — every field for this (org, domain) reverts to the hardcoded default",
+        "description": "Admin/Super Admin only. Idempotent — deleting a pair with no override is a no-op.",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "domain",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
           }
         }
       }
@@ -1195,6 +1906,56 @@
           },
           "403": {
             "description": "Not authorized (Admin/Super Admin only)"
+          }
+        }
+      }
+    },
+    "/brand-voice": {
+      "get": {
+        "summary": "Get the current Brand Voice guidelines",
+        "description": "Admin/Super Admin only. Not org-scoped — there is exactly one current guidelines document, shared by every org's AI email generation (see brandVoice.service.ts for why Organization.brand_voice_guidelines_id doesn't factor in here). No :orgId in the path, deliberately: nesting it under one org's Settings screen would incorrectly imply the edit is scoped to that org, when it actually affects every org's generated drafts.\n",
+        "tags": [
+          "Settings"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandVoiceGuidelinesResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace the current Brand Voice guidelines",
+        "description": "Admin/Super Admin only. Affects every org's next AI-generated draft immediately.",
+        "tags": [
+          "Settings"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBrandVoiceGuidelinesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandVoiceGuidelinesResponse"
+                }
+              }
+            }
           }
         }
       }

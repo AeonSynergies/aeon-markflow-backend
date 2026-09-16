@@ -7,10 +7,12 @@ jest.mock('../../src/models/DomainGuardrailState.model', () => ({
 jest.mock('../../src/models/ReviewTask.model', () => ({
   ReviewTask: { create: jest.fn(), findByIdAndUpdate: jest.fn() },
 }));
+jest.mock('../../src/models/GuardrailSettings.model', () => ({ GuardrailSettings: { findOne: jest.fn() } }));
 jest.mock('../../src/services/internalNotification.service', () => ({ sendInternalNotification: jest.fn() }));
 
 import { DomainGuardrailState } from '../../src/models/DomainGuardrailState.model';
 import { DomainSendEvent } from '../../src/models/DomainSendEvent.model';
+import { GuardrailSettings } from '../../src/models/GuardrailSettings.model';
 import { ReviewTask } from '../../src/models/ReviewTask.model';
 import { UnauthorizedApproverRoleError } from '../../src/services/emailTemplateVersion.service';
 import { sendInternalNotification } from '../../src/services/internalNotification.service';
@@ -66,6 +68,29 @@ describe('sendGuardrail.service', () => {
         mailbox: 'new-mailbox@established.com',
         kind: 'sent',
       });
+      expect(GuardrailSettings.findOne).not.toHaveBeenCalled();
+    });
+
+    it('uses a per-org/domain override of the starting cap when an orgId is given', async () => {
+      (DomainSendEvent.findOne as jest.Mock).mockReturnValue(lean(null));
+      (GuardrailSettings.findOne as jest.Mock).mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ ramp_up_starting_daily_cap: 50 }),
+      });
+
+      await expect(getRampCapForMailbox('override.com', 'sales@override.com', 'org-1')).resolves.toBe(50);
+      expect(GuardrailSettings.findOne).toHaveBeenCalledWith({ org_id: 'org-1', domain: 'override.com' });
+    });
+
+    it('falls back to the hardcoded default for any field the override leaves unset', async () => {
+      const sixDaysAgo = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000);
+      (DomainSendEvent.findOne as jest.Mock).mockReturnValue(lean({ createdAt: sixDaysAgo }));
+      (GuardrailSettings.findOne as jest.Mock).mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ ramp_up_starting_daily_cap: 50 }),
+      });
+
+      // Starting cap overridden to 50, step interval/multiplier still default (3 days / x2):
+      // 6 days / 3-day step interval = 2 steps -> 50 * 2^2 = 200
+      await expect(getRampCapForMailbox('override.com', 'sales@override.com', 'org-1')).resolves.toBe(200);
     });
   });
 
@@ -181,6 +206,7 @@ describe('sendGuardrail.service', () => {
     beforeEach(() => {
       (DomainGuardrailState.findOne as jest.Mock).mockReturnValue({ lean: jest.fn().mockResolvedValue(null) });
       (DomainSendEvent.findOne as jest.Mock).mockReturnValue(lean(null));
+      (GuardrailSettings.findOne as jest.Mock).mockReturnValue({ lean: jest.fn().mockResolvedValue(null) });
     });
 
     it('denies immediately when this mailbox is already paused, without touching metrics', async () => {
@@ -275,6 +301,20 @@ describe('sendGuardrail.service', () => {
       expect(decision.action).toBe('throttled');
       expect(decision.dailyCap).toBe(10); // 20 / 2
       expect(decision.reason).toMatch(/Elevated bounce\/complaint rate/);
+    });
+
+    it('applies a per-org/domain override of the hard-stop bounce threshold', async () => {
+      // 3% bounce: below the hardcoded 5% hard-stop, but above an org-configured 2% override.
+      mockCounts({ sent: 150, bounced: 4, complained: 0, replied: 0 });
+      (GuardrailSettings.findOne as jest.Mock).mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ hard_stop_bounce_rate: 0.02 }),
+      });
+      (ReviewTask.create as jest.Mock).mockResolvedValue({ _id: 'review-1' });
+
+      const decision = await canSend('x.com', 'sales@x.com', 'org-1', { requiresWarmup: false });
+
+      expect(decision.allowed).toBe(false);
+      expect(decision.action).toBe('paused');
     });
 
     it('tracks two mailboxes on the same domain independently — one paused/throttled never affects the other', async () => {

@@ -2,11 +2,15 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import cors from 'cors';
 import swaggerUi from 'swagger-ui-express';
 import { buildOpenApiSpec } from './config/openapi';
+import { brandVoiceRouter } from './routes/brandVoice.routes';
 import { crossOrgInsightRouter } from './routes/crossOrgInsight.routes';
 import { emailTemplateRouter } from './routes/emailTemplate.routes';
+import { guardrailSettingsRouter } from './routes/guardrailSettings.routes';
 import { leadRouter } from './routes/lead.routes';
+import { organizationSettingsRouter } from './routes/organizationSettings.routes';
 import { savedListRouter } from './routes/savedList.routes';
 import { trackingRouter } from './routes/tracking.routes';
+import { userAccessGrantRouter } from './routes/userAccessGrant.routes';
 import { workflowTemplateRouter } from './routes/workflowTemplate.routes';
 import { statusForError } from './utils/httpErrors';
 
@@ -30,6 +34,10 @@ export function createApp(): Express {
   app.use(crossOrgInsightRouter);
   app.use(leadRouter);
   app.use(savedListRouter);
+  app.use(organizationSettingsRouter);
+  app.use(userAccessGrantRouter);
+  app.use(guardrailSettingsRouter);
+  app.use(brandVoiceRouter);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

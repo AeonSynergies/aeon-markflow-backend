@@ -41,7 +41,8 @@ Lead           — one per (Contact, Organization): status enum (NEW-COLD, NEW-I
 SavedList      — reusable lead segments, decoupled from any one workflow; created_by now populated
                  (the Leads screen's bulk "add to SavedList" action, `POST /orgs/{orgId}/saved-lists`
                  and `POST /orgs/{orgId}/saved-lists/{id}/leads` — its only writer so far)
-Organization   — name, enabled_features[], product_context, brand_voice_guidelines_id,
+Organization   — name, enabled_features[], product_context, brand_voice_guidelines_id (unused/
+                 dangling — see BrandVoiceGuidelines below),
                  sending_domains[] { domain, purpose: "marketing" | "transactional" | "alerts",
                  mailboxes[] { address, display_name, status: "active" | "inactive" } }
                  (an org can have multiple sending domains, each tagged with its own purpose — Aeon
@@ -49,7 +50,14 @@ Organization   — name, enabled_features[], product_context, brand_voice_guidel
                  or one purpose per org; each domain/purpose entry can in turn list several mailboxes,
                  round-robinned across at send time — see "Mailbox model" below), send_time_strategy
                  ("manual" | "ai_suggested" | "ai_automatic", default "manual" — org-level, not
-                 per-template; see Phase 7 below)
+                 per-template; see Phase 7 below); enabled_features/sending_domains/send_time_strategy
+                 readable/writable via `GET/PATCH /orgs/{orgId}/organization` — see "Settings screen
+                 backend" below
+GuardrailSettings — per-(org, domain) override of any of SendGuardrail's ramp-up numbers/thresholds
+                 (see src/constants/sendGuardrail.ts's field list) — every field optional, unset
+                 means "use the hardcoded default"; see "Settings screen backend" below
+BrandVoiceGuidelines — the single current Brand Voice guidelines document (text + a content-hash
+                 version), DB-backed as of the Settings screen — see "Settings screen backend" below
 WorkflowTemplate — org-scoped, requires_warmup flag, workflow_type (free-text category, e.g.
                  "cold_outreach" — rolls up send-time performance across templates of the same type),
                  steps[] (email | call_task | sms | wait)
@@ -90,7 +98,9 @@ RecipientProviderCategory — per-domain cache (Phase 8): consumer webmail vs. c
 CrossOrgInsight — an abstracted structural/timing pattern (Phase 8) observed across at least
                  MIN_ORGS_FOR_INSIGHT distinct orgs' own WorkflowTemplate/SendTimePerformance data —
                  sequence_shape, step_count, or send_time_window; never one org's raw content
-UserAccessGrant — { user_id, app: "markflow"|"onboard", org_id (null = all orgs), role, features[] }
+UserAccessGrant — { user_id, app: "markflow"|"onboard", org_id (null = all orgs), role, features[] };
+                 list/create/update via `/orgs/{orgId}/user-access-grants` — see "Settings screen
+                 backend" below
 ```
 
 ## Go-live status: SendGuardrail data sources
@@ -117,7 +127,7 @@ This is a triage aid, not a content generator — it never drafts or sends anyth
 
 ⚠️ **Two things worth flagging, found while building this (the first is now closed — see below):**
 - `exitEnrollment`/`exitAllActiveEnrollmentsForLead` (`enrollment.service.ts`) are themselves new. `Enrollment.exit_reason`/`status: "exited"` have existed in the schema since Phase 4, and this file previously said exit-condition logic was "already built into the human playbook" — that referred to the uploaded seed *business* playbook documents, not existing MarkFlow code; no service anywhere actually moved an enrollment to `exited` before this.
-- No read API yet: `ai_reply_classification` is stored and queryable in Mongo, but this backend has no `Lead`/`LeadActivity` HTTP routes at all (same gap as `Organization` — see "Domain purpose model" below) — nothing in-app surfaces a classified reply to a human yet. ✅ **Half-closed**: `GET /orgs/{orgId}/leads` (see "Leads screen backend" below) is now a real `Lead` read API. `LeadActivity` — and therefore `ai_reply_classification` itself — still has no HTTP route; that's a still-open gap, not attempted here.
+- No read API yet: `ai_reply_classification` is stored and queryable in Mongo, but this backend has no `Lead`/`LeadActivity` HTTP routes at all (same gap as `Organization` — see "Domain purpose model" below) — nothing in-app surfaces a classified reply to a human yet. ✅ **Both closed now**: `GET /orgs/{orgId}/leads` (see "Leads screen backend" below) is a real `Lead` read API, and `GET/PATCH /orgs/{orgId}/organization` (see "Settings screen backend" below) is a real `Organization` read/write API. `LeadActivity` — and therefore `ai_reply_classification` itself — still has no HTTP route; that's a still-open gap, not attempted here.
 
 ✅ **`global_do_not_contact` is now enforced at enrollment time.** `Contact.global_do_not_contact` had no reader anywhere in this codebase when `unsubscribe_request` handling first started writing it — `enrollSavedList` (`enrollment.service.ts`) now checks it for every lead before creating an Enrollment (`isContactSuppressed`) and rejects a suppressed lead outright, reported back in the result's `rejections[]` (surfaced through `POST /orgs/{orgId}/workflow-templates/{templateId}/enrollments`'s response as `rejected_count`/`rejections`) rather than silently dropped or created anyway. This applies universally — there is no separate recycle/win-back enrollment path in this codebase to bypass it; every enrollment, a recycled lead's included, goes through `enrollSavedList`, so an explicit opt-out always overrides `eligible_for_reengagement_at`/`lost_reason`/`lost_stage`. Fails open (does not report suppression, matching this function's pre-existing behavior of trusting `SavedList.lead_ids` without validating each id) only when the Lead or Contact itself can't be found — a data-integrity gap that predates this check and isn't what it's trying to fix. Gating `sendWorkflowEmail` on the flag too, for defense in depth against some future second writer of `global_do_not_contact`, is unnecessary today: the only writer (`suppressContactForUnsubscribe`) already exits every active enrollment for that lead in the same operation, so no enrollment can ever be both active and suppressed.
 
@@ -146,6 +156,24 @@ This is a triage aid, not a content generator — it never drafts or sends anyth
 - "Enroll a SavedList directly into a WorkflowTemplate" — **already built and exposed**, nothing new needed: `POST /orgs/{orgId}/workflow-templates/{templateId}/enrollments` (`enrollment.service.ts`'s `enrollSavedList`, PR #26) already does exactly this.
 
 No pagination on `GET /orgs/{orgId}/leads` — matches every other list endpoint in this codebase (`workflow-templates`, `email-templates`), none of which paginate either. Worth revisiting before a large org's Leads screen ships, since Lead volume is likely to dwarf template counts.
+
+## Settings screen backend
+
+✅ **Built.** Four independent pieces, all gated to `ADMIN_ONLY_ROLES` (Super Admin/Admin only — see the new RBAC rule above): org configuration, `UserAccessGrant` management, SendGuardrail's ramp-up/threshold overrides, and Brand Voice guideline editing.
+
+**Org configuration** — `GET/PATCH /orgs/{orgId}/organization` (`organizationSettings.service.ts`), closing the `Organization` HTTP-route gap flagged in "AI reply-intent classification" above (there were none at all before this). `PATCH` only ever touches `enabled_features[]`, `sending_domains[]`, and `send_time_strategy` — exactly what was asked for, nothing else: `name`, `product_context`, and `brand_voice_guidelines_id` are left alone (the last one is dangling anyway — see below). `sending_domains`, if given, fully replaces the array — same semantics as a `WorkflowTemplate`'s own `steps` field (`.set('sending_domains', ...)`, not a merge). `OrganizationNotFoundError` (`enrollment.service.ts`, reused rather than redeclared) existed since `enrollSavedList`'s own org lookup but had no HTTP status mapping — nothing had ever made it reachable from a route before this — added to `httpErrors.ts` alongside a new `UserAccessGrantNotFoundError`.
+
+**UserAccessGrant management** — `GET/POST /orgs/{orgId}/user-access-grants` (list is org-scoped-or-global: `{org_id: orgId} OR {org_id: null}`, since an all-orgs grant affects this org's access too) and `PATCH /orgs/{orgId}/user-access-grants/{grantId}` (role/features only — `app`/`org_id`/`user_id` are immutable after creation, since the model's own unique index is on that exact triple; changing any of them is really a different grant). List/create/update responses denormalize the granted user's email for display. **A grant can never scope wider than the caller's own access** — enforced in the route layer, not asked for explicitly but a direct, unavoidable consequence of "only Admin/Super Admin can grant access": creating a grant with `org_id: null` (all orgs) requires the caller to already hold `allOrgs` access themselves; creating one for a different org than the URL's requires `canAccessOrg` on that org too. Without this, an Admin scoped to one org could hand out access to every org in the system, which "only Admin/Super Admin can grant access" was never meant to permit.
+
+**SendGuardrail settings — the one that needed the most care.** `GuardrailSettings` (new model) holds a per-(org, domain) override of any of the 11 numbers in `src/constants/sendGuardrail.ts` (ramp-up starting/steady-state cap, step multiplier/interval, both rolling-window sizes, min sample size, throttle/hard-stop bounce/complaint rates) — every field optional, and unset is not the same as zero. `guardrailSettings.service.ts`'s `resolveGuardrailSettings(orgId, domain)` is the *only* place `sendGuardrail.service.ts` reads these numbers from now (`canSend`, `getRampCapForMailbox`): it merges a stored override over `GUARDRAIL_SETTINGS_DEFAULTS` field by field, so **an (org, domain) pair with no override — every one of them today — resolves to exactly the same values SendGuardrail has always used, byte-for-byte.** The enforcement logic itself (rolling-window aggregation, rate-vs-threshold comparison, the ramp-up doubling formula) is completely unchanged; only the source of each input number moved from a direct constant import to this resolution. Verified by re-running every pre-existing `sendGuardrail.service.test.ts` case unmodified (only the added `GuardrailSettings.findOne` mock, always returning "no override," was needed) — all still pass with identical expected values.
+
+Exposed at `GET /orgs/{orgId}/guardrail-settings` (one row per the org's own `sending_domains[]` entries, each showing the *effective* merged values plus `has_override`/`overridden_fields`), `GET/PUT/DELETE /orgs/{orgId}/guardrail-settings/{domain}` (`PUT` upserts only the fields given — the same partial-PATCH semantics as everywhere else in this codebase; `DELETE` clears the whole override, idempotently, reverting every field to default). Deliberately **not** scoped by purpose or mailbox: any configured domain can carry an override regardless of purpose, and the override applies uniformly to every mailbox on that domain — the state that must never pool across mailboxes (ramp elapsed time, pause status) already lives in `DomainSendEvent`/`DomainGuardrailState`, unaffected by any of this.
+
+Two SendGuardrail-adjacent constants deliberately **not** touched: `emailPerformanceAnalysis.service.ts` still reads `THROTTLE_BOUNCE_RATE` directly (a diagnostic labeling heuristic, not the live send gate — out of scope for "SendGuardrail's ramp-up numbers and thresholds"), and `GUARDRAIL_RETRY_DELAY_MS` (the enrollment queue's retry backoff after a guardrail deferral) stays a global constant — it's neither a ramp-up number nor a threshold.
+
+**Brand Voice guideline editing — found a bigger premise gap than expected.** `Organization.brand_voice_guidelines_id` (`ref: 'BrandVoiceGuidelines'`) has never actually been populated or read by anything — there was no `BrandVoiceGuidelines` model at all. The real guidelines lived in a single static `brand-voice-guidelines.md` file baked into the deployment image, read once and cached in memory by `brandVoice.service.ts`'s `getBrandVoiceGuidelines()`, global across every org (no per-org concept whatsoever). A static file can't be edited from a Settings screen — there's nothing to `PUT` to — and even editing it in place wouldn't durably work on App Runner's ephemeral containers (an edit vanishes on the next restart/deploy).
+
+Fix: `BrandVoiceGuidelines` is now a real model (`{ text, version, updated_by }`), and `getBrandVoiceGuidelines()`/new `updateBrandVoiceGuidelines()` are DB-backed — but still a **single global document, not per-org**, matching the file's own pre-existing scope exactly. Wiring genuine per-org brand voice to `Organization.brand_voice_guidelines_id` would be a real product decision (does every org need its own brand voice, or is one shared voice intentional?) that this task didn't ask for and isn't attempted here — `brand_voice_guidelines_id` remains unused/dangling. `getBrandVoiceGuidelines()` falls back to the on-disk file, completely unchanged, until the first real edit — so nothing `generateEmailDraft` reads changes just because this moved off the filesystem. Exposed at `GET/PUT /brand-voice` — **deliberately not nested under `/orgs/{orgId}/...`** like every other Settings-screen endpoint: doing so would visually imply a per-org scope the underlying data doesn't have, and an org admin editing "their" brand voice would actually be silently rewriting every org's AI-generated drafts. `getBrandVoiceGuidelines()`'s caller (`emailGeneration.service.ts`) is now `await`ed — its only caller, so a one-line change; the in-memory cache is gone entirely (state lives in Mongo now, one more query per draft, consistent with everything else that function already looks up).
 
 ## Domain purpose model — `Organization.sending_domains[]`
 
@@ -251,6 +279,8 @@ DKIM setup continues regardless (valuable for deliverability to every provider).
 Recycled/Win-back lead segment visible to: BD-Sales, BD-Manager, Admin only.
 
 Raw cross-org insight data (`GET /cross-org-insights/raw`, Phase 8) visible to: Super Admin, Admin only — see `ADMIN_ONLY_ROLES`. Everyone with workflow access still sees the generic, coarse-labeled recommendations at `GET /cross-org-insights`.
+
+Org-level configuration — `Organization` settings, `UserAccessGrant` management, `GuardrailSettings`, Brand Voice guidelines — visible/editable to: Super Admin, Admin only (`ADMIN_ONLY_ROLES`, same set as raw cross-org insight data). This is a new rule as of the Settings screen backend, not something CLAUDE.md documented before it: only Admin/Super Admin may grant or edit `UserAccessGrant`s at all, which is stricter than `WORKFLOW_ACCESS_ROLES` (BD Admin/BD Manager/BD Sales included there have no access to any of this). See "Settings screen backend" below.
 
 ## Integration points and current status
 
