@@ -35,11 +35,14 @@ Lead           — one per (Contact, Organization): status enum (NEW-COLD, NEW-I
                  eligible_for_reengagement_at
 SavedList      — reusable lead segments, decoupled from any one workflow
 Organization   — name, enabled_features[], product_context, brand_voice_guidelines_id,
-                 sending_domains[] { domain, purpose: "marketing" | "transactional" | "alerts" }
+                 sending_domains[] { domain, purpose: "marketing" | "transactional" | "alerts",
+                 mailboxes[] { address, display_name, status: "active" | "inactive" } }
                  (an org can have multiple sending domains, each tagged with its own purpose — Aeon
                  Miles sometimes sends from the Aeon Synergies domain — never assume 1:1 org-to-domain
-                 or one purpose per org), send_time_strategy ("manual" | "ai_suggested" | "ai_automatic",
-                 default "manual" — org-level, not per-template; see Phase 7 below)
+                 or one purpose per org; each domain/purpose entry can in turn list several mailboxes,
+                 round-robinned across at send time — see "Mailbox model" below), send_time_strategy
+                 ("manual" | "ai_suggested" | "ai_automatic", default "manual" — org-level, not
+                 per-template; see Phase 7 below)
 WorkflowTemplate — org-scoped, requires_warmup flag, workflow_type (free-text category, e.g.
                  "cold_outreach" — rolls up send-time performance across templates of the same type),
                  steps[] (email | call_task | sms | wait)
@@ -88,6 +91,14 @@ Bounce/reply signals are fully live. Spam-complaint signal is only partial (Yaho
 **Known real mapping, Aeon Synergies (DKIM confirmed on both):** `aeonsynergies.com` is `transactional`, `mail.aeonsynergies.com` is `marketing`. Record this in whichever org's `sending_domains[]` actually lists them (e.g. Aeon Miles's, if it sends via the Aeon Synergies domain) and in `DOMAIN_PROVIDER_MAP_JSON` (see `.env.example`) — the two configs are separate (org-permission vs. provider-ownership) and both need the real domains listed.
 
 **Not the same system**: MarkFlow's own internal ops notifications (`ReviewTask` alerts, `SendGuardrail` pause notices) do **not** go through this model at all — see the next section. They use a single fixed deployment-level mailbox (`INTERNAL_NOTIFICATIONS_MAILBOX`), never `Organization.sending_domains[]`/`DomainRouter`, because they're MarkFlow's own alerts to its own ops team, not a per-org customer-facing send.
+
+## Mailbox model — per-domain mailboxes, round-robin assignment, per-mailbox SendGuardrail
+
+✅ **Built.** Each `sending_domains[]` entry can list several `mailboxes[]` (`{ address, display_name, status: "active" | "inactive" }` — `src/constants/organization.ts`'s `SenderMailboxEntry`), not just one implicit sender per domain. Left empty (the default — no migration needed for existing orgs), `resolveSendingRoute` falls back to `DOMAIN_PROVIDER_MAP_JSON`'s single deployment-level mailbox for that domain, exactly as before this existed.
+
+**Assignment is explicit, not implicit.** `mailboxAssignment.service.ts`'s `assignMailboxForDomain()` round-robins across a domain's `active` mailboxes by picking whichever has sent the fewest emails all-time (from `DomainSendEvent`, the same durable log SendGuardrail itself aggregates) — not an in-memory rotating cursor, which would race across `enrollmentProcessor`'s concurrent BullMQ workers and reset on every deploy. This converges on the same even rotation a cursor would, but the choice is always a read of real, auditable send history rather than hidden state. `inactive` mailboxes are never candidates but keep their own history intact for reactivation.
+
+**SendGuardrail tracks per mailbox, not per domain.** `DomainSendEvent`'s rolling-window aggregation and `DomainGuardrailState`'s pause state are both keyed on `(domain, mailbox)`, not `domain` alone — `getRampCapForMailbox()`, `canSend()`, `pauseDomain()`, and `resumeDomain()` all take an explicit `mailbox` argument now. This is the actual point: one mailbox tripping a hard-stop bounce/complaint rate pauses only that mailbox, never every other mailbox sharing its domain, and a newly added mailbox has no `DomainSendEvent` rows of its own yet — so it always starts its own ramp-up from `RAMP_UP_STARTING_DAILY_CAP`, regardless of how established the domain (or its other mailboxes) already are. `ReviewTask` (`kind: domain_guardrail`) now records `mailbox` alongside `domain` so a human reviewing a paused-mailbox task knows which one, not just which domain.
 
 ## Internal notifications (ReviewTask alerts, SendGuardrail pause notices) — built
 

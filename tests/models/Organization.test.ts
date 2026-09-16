@@ -39,6 +39,59 @@ describe('Organization model', () => {
     expect(doc.sending_domains?.[1]).toMatchObject({ domain: 'aeonsynergies.com', purpose: 'transactional' });
   });
 
+  it('defaults a sending domain entry\'s mailboxes to an empty array', () => {
+    const doc = new Organization({
+      name: 'Aeon Miles',
+      product_context: AEON_MILES_PRODUCT_CONTEXT,
+      sending_domains: [{ domain: 'aeonmiles.com', purpose: 'marketing' }],
+    });
+    expect(doc.sending_domains?.[0].mailboxes).toEqual([]);
+  });
+
+  it('accepts a sending domain entry with several mailboxes, defaulting status to active', () => {
+    const doc = new Organization({
+      name: 'Aeon Miles',
+      product_context: AEON_MILES_PRODUCT_CONTEXT,
+      sending_domains: [
+        {
+          domain: 'aeonmiles.com',
+          purpose: 'marketing',
+          mailboxes: [
+            { address: 'alex@aeonmiles.com', display_name: 'Alex' },
+            { address: 'jordan@aeonmiles.com', status: 'inactive' },
+          ],
+        },
+      ],
+    });
+    expect(doc.validateSync()).toBeUndefined();
+    expect(doc.sending_domains?.[0].mailboxes).toHaveLength(2);
+    expect(doc.sending_domains?.[0].mailboxes?.[0]).toMatchObject({
+      address: 'alex@aeonmiles.com',
+      display_name: 'Alex',
+      status: 'active',
+    });
+    expect(doc.sending_domains?.[0].mailboxes?.[1]).toMatchObject({
+      address: 'jordan@aeonmiles.com',
+      status: 'inactive',
+    });
+  });
+
+  it('rejects a mailbox with an unknown status', () => {
+    const doc = new Organization({
+      name: 'Aeon Miles',
+      product_context: AEON_MILES_PRODUCT_CONTEXT,
+      sending_domains: [
+        {
+          domain: 'aeonmiles.com',
+          purpose: 'marketing',
+          mailboxes: [{ address: 'alex@aeonmiles.com', status: 'archived' }],
+        },
+      ],
+    });
+    const err = doc.validateSync();
+    expect(err?.errors['sending_domains.0.mailboxes.0.status']).toBeDefined();
+  });
+
   it('rejects a sending domain with an unknown purpose', () => {
     const doc = new Organization({
       name: 'Aeon Miles',

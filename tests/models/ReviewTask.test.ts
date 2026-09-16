@@ -37,21 +37,23 @@ describe('ReviewTask model', () => {
     expect(doc.kind).toBe('email_template_version');
   });
 
-  it('requires domain (not email_template_version_id) when kind is domain_guardrail', () => {
+  it('requires domain and mailbox (not email_template_version_id) when kind is domain_guardrail', () => {
     const doc = new ReviewTask({
       org_id: new Types.ObjectId(),
       kind: 'domain_guardrail',
     });
     const err = doc.validateSync();
     expect(err?.errors.domain).toBeDefined();
+    expect(err?.errors.mailbox).toBeDefined();
     expect(err?.errors.email_template_version_id).toBeUndefined();
   });
 
-  it('validates a domain_guardrail review task with a domain set', () => {
+  it('validates a domain_guardrail review task with a domain and mailbox set', () => {
     const doc = new ReviewTask({
       org_id: new Types.ObjectId(),
       kind: 'domain_guardrail',
       domain: 'aeonsign.com',
+      mailbox: 'sales@aeonsign.com',
     });
     expect(doc.validateSync()).toBeUndefined();
   });

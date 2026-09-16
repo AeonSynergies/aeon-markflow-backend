@@ -9,10 +9,10 @@ import { SEND_EVENT_KINDS } from '../constants/sendGuardrail';
  * calculations are always exactly reproducible from raw events and never drift from
  * double-counting or a missed decrement.
  *
- * `email_template_version_id` is optional — SendGuardrail's own domain-level aggregation never
+ * `email_template_version_id` is optional — SendGuardrail's own per-mailbox aggregation never
  * filters by it, but the diagnosis-by-symptom analysis
  * (src/services/emailPerformanceAnalysis.service.ts) uses it to compute a specific version's own
- * bounce rate, separate from the domain's aggregate.
+ * bounce rate, separate from the mailbox's aggregate.
  */
 const domainSendEventSchema = new Schema(
   {
@@ -27,8 +27,11 @@ const domainSendEventSchema = new Schema(
   { timestamps: true },
 );
 
-// Rolling-window aggregation always filters by (domain, kind, createdAt range).
-domainSendEventSchema.index({ domain: 1, kind: 1, createdAt: 1 });
+// Rolling-window aggregation always filters by (domain, mailbox, kind, createdAt range) — ramp-up
+// caps and bounce/complaint thresholds are tracked and enforced independently per mailbox, never
+// pooled across every mailbox sharing a domain, so a newly added mailbox always starts its own
+// ramp-up from zero regardless of how established the domain already is.
+domainSendEventSchema.index({ domain: 1, mailbox: 1, kind: 1, createdAt: 1 });
 // The diagnosis pipeline's per-version bounce-rate query.
 domainSendEventSchema.index({ email_template_version_id: 1, kind: 1 }, { sparse: true });
 
