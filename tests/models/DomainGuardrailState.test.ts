@@ -27,9 +27,9 @@ describe('DomainGuardrailState model', () => {
     expect(doc.validateSync()?.errors.status).toBeDefined();
   });
 
-  it('enforces one state document per domain via a unique index', () => {
+  it('enforces one state document per (domain, mailbox) pair via a unique compound index', () => {
     const indexes = DomainGuardrailState.schema.indexes();
-    const domainIndex = indexes.find(([fields]) => fields.domain === 1);
-    expect(domainIndex?.[1].unique).toBe(true);
+    const compoundIndex = indexes.find(([fields]) => fields.domain === 1 && fields.mailbox === 1);
+    expect(compoundIndex?.[1].unique).toBe(true);
   });
 });

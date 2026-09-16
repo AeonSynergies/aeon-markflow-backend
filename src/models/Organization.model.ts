@@ -1,6 +1,16 @@
 import { Schema, model, type InferSchemaType, type Types } from 'mongoose';
-import { SENDING_DOMAIN_PURPOSES } from '../constants/organization';
+import { SENDER_MAILBOX_STATUSES, SENDING_DOMAIN_PURPOSES } from '../constants/organization';
 import { SEND_TIME_STRATEGIES } from '../constants/sendTimeOptimization';
+
+// See SenderMailboxEntry in src/constants/organization.ts for the active/inactive distinction.
+const senderMailboxSchema = new Schema(
+  {
+    address: { type: String, required: true, trim: true, lowercase: true },
+    display_name: { type: String, trim: true, default: null },
+    status: { type: String, enum: SENDER_MAILBOX_STATUSES, default: 'active', required: true },
+  },
+  { _id: false },
+);
 
 // Each org uses subdomains by purpose rather than one flat domain — e.g. for Aeon Synergies:
 // aeonsynergies.com is transactional, mail.aeonsynergies.com is marketing. DomainRouter picks a
@@ -10,6 +20,10 @@ const sendingDomainSchema = new Schema(
   {
     domain: { type: String, required: true, trim: true, lowercase: true },
     purpose: { type: String, enum: SENDING_DOMAIN_PURPOSES, required: true },
+    // Round-robinned across by mailboxAssignment.service.ts's assignMailboxForDomain() whenever
+    // this domain/purpose is resolved for a send. Left empty, resolveSendingRoute falls back to
+    // DOMAIN_PROVIDER_MAP_JSON's single deployment-level mailbox for this domain instead.
+    mailboxes: { type: [senderMailboxSchema], default: [] },
   },
   { _id: false },
 );

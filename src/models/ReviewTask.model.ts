@@ -22,6 +22,14 @@ const reviewTaskSchema = new Schema(
       trim: true,
       required: requiredWhenKindIs('domain_guardrail', 'domain is required when kind is domain_guardrail'),
     },
+    // SendGuardrail pauses a (domain, mailbox) pair, not the whole domain — a human reviewing
+    // this task needs to know which mailbox tripped it, since another mailbox on the same domain
+    // may still be sending normally.
+    mailbox: {
+      type: String,
+      trim: true,
+      required: requiredWhenKindIs('domain_guardrail', 'mailbox is required when kind is domain_guardrail'),
+    },
     // Set by send-time optimization's ai_suggested path (Phase 7) — see sendTimeOptimization.service.ts.
     send_time_recommendation_id: {
       type: Schema.Types.ObjectId,
@@ -44,7 +52,7 @@ const reviewTaskSchema = new Schema(
 );
 
 reviewTaskSchema.index({ org_id: 1, status: 1 });
-reviewTaskSchema.index({ domain: 1, status: 1 });
+reviewTaskSchema.index({ domain: 1, mailbox: 1, status: 1 });
 
 export type ReviewTaskDocument = InferSchemaType<typeof reviewTaskSchema> & { _id: Types.ObjectId };
 

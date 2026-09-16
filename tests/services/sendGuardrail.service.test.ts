@@ -16,7 +16,7 @@ import { UnauthorizedApproverRoleError } from '../../src/services/emailTemplateV
 import { sendInternalNotification } from '../../src/services/internalNotification.service';
 import {
   canSend,
-  getRampCapForDomain,
+  getRampCapForMailbox,
   pauseDomain,
   recordDeliverabilityEvent,
   recordSend,
@@ -36,23 +36,36 @@ function mockCounts(counts: Partial<Record<'sent' | 'bounced' | 'complained' | '
 describe('sendGuardrail.service', () => {
   afterEach(() => jest.clearAllMocks());
 
-  describe('getRampCapForDomain', () => {
-    it('returns the starting cap for a domain with no send history', async () => {
+  describe('getRampCapForMailbox', () => {
+    it('returns the starting cap for a mailbox with no send history', async () => {
       (DomainSendEvent.findOne as jest.Mock).mockReturnValue(lean(null));
-      await expect(getRampCapForDomain('new.com')).resolves.toBe(20);
+      await expect(getRampCapForMailbox('new.com', 'sales@new.com')).resolves.toBe(20);
     });
 
-    it('doubles the cap every step interval since the first send', async () => {
+    it('doubles the cap every step interval since the mailbox\'s first send', async () => {
       const sixDaysAgo = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000);
       (DomainSendEvent.findOne as jest.Mock).mockReturnValue(lean({ createdAt: sixDaysAgo }));
       // 6 days / 3-day step interval = 2 steps -> 20 * 2^2 = 80
-      await expect(getRampCapForDomain('warming.com')).resolves.toBe(80);
+      await expect(getRampCapForMailbox('warming.com', 'sales@warming.com')).resolves.toBe(80);
     });
 
     it('never exceeds the steady-state cap', async () => {
       const wayInThePast = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
       (DomainSendEvent.findOne as jest.Mock).mockReturnValue(lean({ createdAt: wayInThePast }));
-      await expect(getRampCapForDomain('old.com')).resolves.toBe(2000);
+      await expect(getRampCapForMailbox('old.com', 'sales@old.com')).resolves.toBe(2000);
+    });
+
+    it('queries by (domain, mailbox), so a second mailbox on the same domain starts its own ramp-up from scratch', async () => {
+      const findOne = DomainSendEvent.findOne as jest.Mock;
+      findOne.mockReturnValue(lean(null));
+
+      await getRampCapForMailbox('established.com', 'new-mailbox@established.com');
+
+      expect(findOne).toHaveBeenCalledWith({
+        domain: 'established.com',
+        mailbox: 'new-mailbox@established.com',
+        kind: 'sent',
+      });
     });
   });
 
@@ -73,32 +86,39 @@ describe('sendGuardrail.service', () => {
     it('records a bounced/complained/replied event', async () => {
       await recordDeliverabilityEvent('x.com', 'sales@x.com', 'org-1', 'bounced', { leadId: 'lead-1' });
       expect(DomainSendEvent.create).toHaveBeenCalledWith(
-        expect.objectContaining({ domain: 'x.com', kind: 'bounced', lead_id: 'lead-1' }),
+        expect.objectContaining({ domain: 'x.com', mailbox: 'sales@x.com', kind: 'bounced', lead_id: 'lead-1' }),
       );
     });
   });
 
   describe('pauseDomain', () => {
-    it('creates a domain_guardrail ReviewTask and upserts a paused state', async () => {
+    it('creates a domain_guardrail ReviewTask and upserts a paused state keyed by (domain, mailbox)', async () => {
       (DomainGuardrailState.findOne as jest.Mock).mockResolvedValue(null);
       (ReviewTask.create as jest.Mock).mockResolvedValue({ _id: 'review-1' });
 
       await pauseDomain('x.com', 'sales@x.com', 'org-1', 'bounce rate too high');
 
+      expect(DomainGuardrailState.findOne).toHaveBeenCalledWith({ domain: 'x.com', mailbox: 'sales@x.com' });
       expect(ReviewTask.create).toHaveBeenCalledWith(
-        expect.objectContaining({ org_id: 'org-1', kind: 'domain_guardrail', domain: 'x.com', status: 'OPEN' }),
+        expect.objectContaining({
+          org_id: 'org-1',
+          kind: 'domain_guardrail',
+          domain: 'x.com',
+          mailbox: 'sales@x.com',
+          status: 'OPEN',
+        }),
       );
       expect(DomainGuardrailState.findOneAndUpdate).toHaveBeenCalledWith(
-        { domain: 'x.com' },
+        { domain: 'x.com', mailbox: 'sales@x.com' },
         expect.objectContaining({ status: 'paused', paused_reason: 'bounce rate too high', review_task_id: 'review-1' }),
         { upsert: true },
       );
       expect(sendInternalNotification).toHaveBeenCalledWith(
-        expect.objectContaining({ subject: expect.stringContaining('x.com') }),
+        expect.objectContaining({ subject: expect.stringContaining('sales@x.com') }),
       );
     });
 
-    it('is a no-op when the domain is already paused (no duplicate ReviewTask or notification)', async () => {
+    it('is a no-op when this exact mailbox is already paused (no duplicate ReviewTask or notification)', async () => {
       (DomainGuardrailState.findOne as jest.Mock).mockResolvedValue({ status: 'paused' });
 
       await pauseDomain('x.com', 'sales@x.com', 'org-1', 'still bad');
@@ -107,30 +127,47 @@ describe('sendGuardrail.service', () => {
       expect(DomainGuardrailState.findOneAndUpdate).not.toHaveBeenCalled();
       expect(sendInternalNotification).not.toHaveBeenCalled();
     });
+
+    it('pauses a second mailbox on the same domain independently of the first', async () => {
+      (DomainGuardrailState.findOne as jest.Mock).mockResolvedValue(null);
+      (ReviewTask.create as jest.Mock).mockResolvedValue({ _id: 'review-2' });
+
+      await pauseDomain('x.com', 'other@x.com', 'org-1', 'unrelated breach');
+
+      expect(DomainGuardrailState.findOne).toHaveBeenCalledWith({ domain: 'x.com', mailbox: 'other@x.com' });
+      expect(DomainGuardrailState.findOneAndUpdate).toHaveBeenCalledWith(
+        { domain: 'x.com', mailbox: 'other@x.com' },
+        expect.objectContaining({ status: 'paused' }),
+        { upsert: true },
+      );
+    });
   });
 
   describe('resumeDomain', () => {
     it('rejects a role that cannot approve templates', async () => {
-      await expect(resumeDomain('x.com', 'user-1', 'BD_LEAD_GEN')).rejects.toThrow(UnauthorizedApproverRoleError);
+      await expect(resumeDomain('x.com', 'sales@x.com', 'user-1', 'BD_LEAD_GEN')).rejects.toThrow(
+        UnauthorizedApproverRoleError,
+      );
       expect(DomainGuardrailState.findOne).not.toHaveBeenCalled();
     });
 
-    it('no-ops when the domain is not currently paused', async () => {
+    it('no-ops when this mailbox is not currently paused', async () => {
       (DomainGuardrailState.findOne as jest.Mock).mockReturnValue({ lean: jest.fn().mockResolvedValue(null) });
-      await resumeDomain('x.com', 'user-1', 'ADMIN');
+      await resumeDomain('x.com', 'sales@x.com', 'user-1', 'ADMIN');
       expect(DomainGuardrailState.findOneAndUpdate).not.toHaveBeenCalled();
       expect(ReviewTask.findByIdAndUpdate).not.toHaveBeenCalled();
     });
 
-    it('reactivates a paused domain and resolves its ReviewTask', async () => {
+    it('reactivates a paused mailbox and resolves its ReviewTask', async () => {
       (DomainGuardrailState.findOne as jest.Mock).mockReturnValue({
         lean: jest.fn().mockResolvedValue({ status: 'paused', review_task_id: 'review-1' }),
       });
 
-      await resumeDomain('x.com', 'user-1', 'ADMIN');
+      await resumeDomain('x.com', 'sales@x.com', 'user-1', 'ADMIN');
 
+      expect(DomainGuardrailState.findOne).toHaveBeenCalledWith({ domain: 'x.com', mailbox: 'sales@x.com' });
       expect(DomainGuardrailState.findOneAndUpdate).toHaveBeenCalledWith(
-        { domain: 'x.com' },
+        { domain: 'x.com', mailbox: 'sales@x.com' },
         expect.objectContaining({ status: 'active', resumed_by: 'user-1' }),
       );
       expect(ReviewTask.findByIdAndUpdate).toHaveBeenCalledWith(
@@ -146,15 +183,24 @@ describe('sendGuardrail.service', () => {
       (DomainSendEvent.findOne as jest.Mock).mockReturnValue(lean(null));
     });
 
-    it('denies immediately when the domain is already paused, without touching metrics', async () => {
+    it('denies immediately when this mailbox is already paused, without touching metrics', async () => {
       (DomainGuardrailState.findOne as jest.Mock).mockReturnValue({
         lean: jest.fn().mockResolvedValue({ status: 'paused', paused_reason: 'extreme bounce rate' }),
       });
 
       const decision = await canSend('x.com', 'sales@x.com', 'org-1', { requiresWarmup: true });
 
+      expect(DomainGuardrailState.findOne).toHaveBeenCalledWith({ domain: 'x.com', mailbox: 'sales@x.com' });
       expect(decision).toEqual({ allowed: false, action: 'paused', reason: 'extreme bounce rate' });
       expect(DomainSendEvent.aggregate).not.toHaveBeenCalled();
+    });
+
+    it('scopes its rolling-window aggregation to this exact (domain, mailbox) pair', async () => {
+      mockCounts({ sent: 5, bounced: 0, complained: 0, replied: 0 });
+      await canSend('x.com', 'sales@x.com', 'org-1', { requiresWarmup: false });
+
+      const [pipeline] = (DomainSendEvent.aggregate as jest.Mock).mock.calls[0];
+      expect(pipeline[0].$match).toMatchObject({ domain: 'x.com', mailbox: 'sales@x.com' });
     });
 
     it('hard-stops and pauses on an extreme bounce rate once the sample size is met', async () => {
@@ -166,7 +212,9 @@ describe('sendGuardrail.service', () => {
       expect(decision.allowed).toBe(false);
       expect(decision.action).toBe('paused');
       expect(decision.reason).toMatch(/Bounce rate/);
-      expect(ReviewTask.create).toHaveBeenCalledWith(expect.objectContaining({ kind: 'domain_guardrail', domain: 'x.com' }));
+      expect(ReviewTask.create).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'domain_guardrail', domain: 'x.com', mailbox: 'sales@x.com' }),
+      );
       expect(DomainGuardrailState.findOneAndUpdate).toHaveBeenCalled();
     });
 
@@ -227,6 +275,27 @@ describe('sendGuardrail.service', () => {
       expect(decision.action).toBe('throttled');
       expect(decision.dailyCap).toBe(10); // 20 / 2
       expect(decision.reason).toMatch(/Elevated bounce\/complaint rate/);
+    });
+
+    it('tracks two mailboxes on the same domain independently — one paused/throttled never affects the other', async () => {
+      // The "established" mailbox is deep into a hard-stop-level bounce rate...
+      mockCounts({ sent: 150, bounced: 25, complained: 0, replied: 0 });
+      (ReviewTask.create as jest.Mock).mockResolvedValue({ _id: 'review-1' });
+      const establishedDecision = await canSend('shared.com', 'established@shared.com', 'org-1', {
+        requiresWarmup: true,
+      });
+      expect(establishedDecision.allowed).toBe(false);
+      expect(establishedDecision.action).toBe('paused');
+
+      // ...but DomainGuardrailState.findOne for the *other* mailbox on the same domain is a fresh
+      // lookup, unaffected by the first mailbox's pause, and a clean send history means it's not
+      // even sampled yet.
+      (DomainGuardrailState.findOne as jest.Mock).mockReturnValue({ lean: jest.fn().mockResolvedValue(null) });
+      mockCounts({ sent: 5, bounced: 0, complained: 0, replied: 0 });
+      const newMailboxDecision = await canSend('shared.com', 'new@shared.com', 'org-1', { requiresWarmup: true });
+
+      expect(newMailboxDecision.allowed).toBe(true);
+      expect(newMailboxDecision.dailyCap).toBe(20); // starts its own ramp-up from RAMP_UP_STARTING_DAILY_CAP
     });
   });
 });

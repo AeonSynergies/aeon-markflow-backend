@@ -9,12 +9,36 @@
 export const SENDING_DOMAIN_PURPOSES = ['marketing', 'transactional', 'alerts'] as const;
 export type SendingDomainPurpose = (typeof SENDING_DOMAIN_PURPOSES)[number];
 
+export const SENDER_MAILBOX_STATUSES = ['active', 'inactive'] as const;
+export type SenderMailboxStatus = (typeof SENDER_MAILBOX_STATUSES)[number];
+
+/**
+ * One mailbox MarkFlow may send as, under a given sending_domains[] entry.
+ * `mailboxAssignment.service.ts`'s assignMailboxForDomain() round-robins sends across every
+ * `active` mailbox on an entry; `inactive` keeps a mailbox configured — its own SendGuardrail
+ * ramp-up/bounce history in DomainSendEvent stays intact — without new sends currently landing
+ * on it, e.g. while it's being re-provisioned, or deliberately retired without losing its audit
+ * trail. `display_name` is optional metadata only (e.g. "Alex - SDR"); nothing in DomainRouter or
+ * SendGuardrail reads it.
+ */
+export interface SenderMailboxEntry {
+  address: string;
+  display_name?: string | null;
+  status: SenderMailboxStatus;
+}
+
 /**
  * The plain (lean-friendly) shape of one Organization.sending_domains[] entry. DomainRouter
  * always works off `.lean()` results, never a hydrated Organization document, so its functions
  * type against this rather than `OrganizationDocument`'s Mongoose subdocument-array type.
+ *
+ * `mailboxes` defaults to `[]` for any entry nobody has migrated yet — resolveSendingRoute
+ * (domainRouter.service.ts) falls back to the deployment-level DOMAIN_PROVIDER_MAP_JSON's single
+ * `mailbox` for that domain whenever this is empty, so an org that hasn't explicitly configured
+ * per-domain mailboxes keeps sending exactly as it did before this existed.
  */
 export interface SendingDomainEntry {
   domain: string;
   purpose: SendingDomainPurpose;
+  mailboxes: SenderMailboxEntry[];
 }

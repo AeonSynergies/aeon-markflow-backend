@@ -90,7 +90,7 @@ async function sendWorkflowEmail(enrollment: EnrollmentDocument, step: WorkflowS
 
   // Workflow enrollment sends are always MarkFlow's own cold-outreach/sequence sends — always
   // resolved against the org's marketing-purpose domains, never transactional/alerts ones.
-  const route = resolveSendingRoute(org, step.sending_domain, 'marketing');
+  const route = await resolveSendingRoute(org, step.sending_domain, 'marketing');
 
   const decision = await canSend(route.domain, route.mailbox, orgId, {
     requiresWarmup: enrollment.requires_warmup ?? false,
