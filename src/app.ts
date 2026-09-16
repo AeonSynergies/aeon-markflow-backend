@@ -4,6 +4,8 @@ import swaggerUi from 'swagger-ui-express';
 import { buildOpenApiSpec } from './config/openapi';
 import { crossOrgInsightRouter } from './routes/crossOrgInsight.routes';
 import { emailTemplateRouter } from './routes/emailTemplate.routes';
+import { leadRouter } from './routes/lead.routes';
+import { savedListRouter } from './routes/savedList.routes';
 import { trackingRouter } from './routes/tracking.routes';
 import { workflowTemplateRouter } from './routes/workflowTemplate.routes';
 import { statusForError } from './utils/httpErrors';
@@ -26,6 +28,8 @@ export function createApp(): Express {
   app.use(workflowTemplateRouter);
   app.use(emailTemplateRouter);
   app.use(crossOrgInsightRouter);
+  app.use(leadRouter);
+  app.use(savedListRouter);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

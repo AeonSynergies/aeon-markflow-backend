@@ -26,8 +26,9 @@ MarkFlow owns everything **before** a deal is priced: Leads, the marketing/engag
 ## Core entities (Mongoose-shaped)
 
 ```
-Contact        — shared across orgs: email, phone, timezone (IANA name, nullable — send-time
-                 optimization resolves to this, never the server's own timezone), firmographics
+Contact        — shared across orgs: name, company (both free-text — see "Leads screen backend"
+                 below), email, phone, timezone (IANA name, nullable — send-time optimization
+                 resolves to this, never the server's own timezone), firmographics
                  (dsp_code, drivers, vans, stations), global_do_not_contact (hard suppress override —
                  set autonomously by an AI-classified unsubscribe_request reply, its only writer;
                  checked by enrollSavedList before every new Enrollment, its only reader; see "AI
@@ -35,8 +36,11 @@ Contact        — shared across orgs: email, phone, timezone (IANA name, nullab
 Lead           — one per (Contact, Organization): status enum (NEW-COLD, NEW-INBOUND, CONTACTED,
                  CONTACTED-PHONE, CONTACTED-EMAIL, PROSPECT, INACTIVE, RECLAIMED), email_deliverability
                  (GOOD/LOW/BAD), phone_dnd_status, org_id, recycled_from_deal_id, lost_reason, lost_stage,
-                 eligible_for_reengagement_at
-SavedList      — reusable lead segments, decoupled from any one workflow
+                 eligible_for_reengagement_at; listable/filterable/searchable via
+                 `GET /orgs/{orgId}/leads` — see "Leads screen backend" below
+SavedList      — reusable lead segments, decoupled from any one workflow; created_by now populated
+                 (the Leads screen's bulk "add to SavedList" action, `POST /orgs/{orgId}/saved-lists`
+                 and `POST /orgs/{orgId}/saved-lists/{id}/leads` — its only writer so far)
 Organization   — name, enabled_features[], product_context, brand_voice_guidelines_id,
                  sending_domains[] { domain, purpose: "marketing" | "transactional" | "alerts",
                  mailboxes[] { address, display_name, status: "active" | "inactive" } }
@@ -113,7 +117,7 @@ This is a triage aid, not a content generator — it never drafts or sends anyth
 
 ⚠️ **Two things worth flagging, found while building this (the first is now closed — see below):**
 - `exitEnrollment`/`exitAllActiveEnrollmentsForLead` (`enrollment.service.ts`) are themselves new. `Enrollment.exit_reason`/`status: "exited"` have existed in the schema since Phase 4, and this file previously said exit-condition logic was "already built into the human playbook" — that referred to the uploaded seed *business* playbook documents, not existing MarkFlow code; no service anywhere actually moved an enrollment to `exited` before this.
-- No read API yet: `ai_reply_classification` is stored and queryable in Mongo, but this backend has no `Lead`/`LeadActivity` HTTP routes at all (same gap as `Organization` — see "Domain purpose model" below) — nothing in-app surfaces a classified reply to a human yet. That's frontend-adjacent, separate-repo work, or a new route domain neither asked for nor attempted here.
+- No read API yet: `ai_reply_classification` is stored and queryable in Mongo, but this backend has no `Lead`/`LeadActivity` HTTP routes at all (same gap as `Organization` — see "Domain purpose model" below) — nothing in-app surfaces a classified reply to a human yet. ✅ **Half-closed**: `GET /orgs/{orgId}/leads` (see "Leads screen backend" below) is now a real `Lead` read API. `LeadActivity` — and therefore `ai_reply_classification` itself — still has no HTTP route; that's a still-open gap, not attempted here.
 
 ✅ **`global_do_not_contact` is now enforced at enrollment time.** `Contact.global_do_not_contact` had no reader anywhere in this codebase when `unsubscribe_request` handling first started writing it — `enrollSavedList` (`enrollment.service.ts`) now checks it for every lead before creating an Enrollment (`isContactSuppressed`) and rejects a suppressed lead outright, reported back in the result's `rejections[]` (surfaced through `POST /orgs/{orgId}/workflow-templates/{templateId}/enrollments`'s response as `rejected_count`/`rejections`) rather than silently dropped or created anyway. This applies universally — there is no separate recycle/win-back enrollment path in this codebase to bypass it; every enrollment, a recycled lead's included, goes through `enrollSavedList`, so an explicit opt-out always overrides `eligible_for_reengagement_at`/`lost_reason`/`lost_stage`. Fails open (does not report suppression, matching this function's pre-existing behavior of trusting `SavedList.lead_ids` without validating each id) only when the Lead or Contact itself can't be found — a data-integrity gap that predates this check and isn't what it's trying to fix. Gating `sendWorkflowEmail` on the flag too, for defense in depth against some future second writer of `global_do_not_contact`, is unnecessary today: the only writer (`suppressContactForUnsubscribe`) already exits every active enrollment for that lead in the same operation, so no enrollment can ever be both active and suppressed.
 
@@ -124,6 +128,24 @@ This is a triage aid, not a content generator — it never drafts or sends anyth
 **One endpoint serves two roles, deliberately not two separate ones.** Unfiltered, it's the browsable listing a management UI would use to show every template in the org (not just ones pending approval — it always did this; the gap was the missing filters, not missing breadth). Called with `status=APPROVED` plus whatever persona/workflow_position/intended_workflow_type context a step's inspector knows, it's also the workflow builder's own candidate-template picker — narrowing directly to templates that already have an approved, pinnable version (`current_version_id` is right there in the response) instead of listing every approved template in the org. There was no separate pre-existing "picker" endpoint to update: the prior flow was list-everything-unfiltered, then a separate per-template versions call — this single filtered endpoint replaces both steps for the picker's purposes.
 
 `GET /orgs/{orgId}/email-templates/{templateId}/usages` is new: every `WorkflowTemplate` step currently pinned to any version of a template, computed live from `WorkflowTemplate.steps` on every call (no stored index) — meant to warn a human what would break before they edit or retire a template still in use. Deliberately never looks at `Enrollment.steps`: those are frozen per-enrollment snapshots (same "never re-resolved" reasoning as everywhere else in this codebase) that can't be broken by a live template change, so they're not a "current" usage by this endpoint's own definition.
+
+## Leads screen backend (`GET /orgs/{orgId}/leads`, SavedList bulk actions)
+
+✅ **Built.** `GET /orgs/{orgId}/leads` lists/filters/searches `Lead` for one org — `status` (any `LEAD_STATUSES` value), `segment=recycled` (see below), and `search` (case-insensitive substring match against the lead's `Contact` name/company). Open to every role with org access, including BD-Lead Gen — pure viewing, no workflow action.
+
+**Two things this request assumed already existed but didn't, flagged here rather than silently built around or silently fixed without mention:**
+- **`Contact` had no `name` or `company` field at all** before this — only `email`/`phone`/`timezone`/`firmographics`. "Search by name/company" needed something to search, so both are new free-text fields on `Contact` (identity facts, same reasoning as `email`/`phone` living there rather than on `Lead` — a person's name/employer doesn't change per org they're a lead for). Neither is backfilled; existing Contacts have both as `undefined` until captured.
+- **There was no `Lead`/`SavedList` HTTP route domain at all** before this (flagged as an open gap in "AI reply-intent classification" above) — `GET /orgs/{orgId}/leads` and the `SavedList` endpoints below are new route files (`lead.routes.ts`, `savedList.routes.ts`), not extensions of something pre-existing.
+
+**Recycled/Win-back segment**: `segment=recycled` forces `status: RECLAIMED` (ignoring any `status` filter also passed) and the response's `lost_reason`/`lost_stage` are populated for those rows the same way they already are for every other `Lead` — there's no separate response shape. Gated to `RECYCLED_SEGMENT_ROLES` (`BD_SALES`/`BD_MANAGER`/`ADMIN`/`SUPER_ADMIN` — **not** `BD_ADMIN`, matching the RBAC table's own narrower list for this one segment, deliberately not the broader `WORKFLOW_ACCESS_ROLES`) — any other role requesting it gets a 403, not a silently-empty or silently-unfiltered result. This is a query-time check inside the handler, not a route-level `requireRole`, since it's a filter on one endpoint rather than a separate one.
+
+**Contact is shared across orgs — the response is always this org's own Lead, never leaked from another.** `search` resolves matching `Contact._id`s first, then queries `Lead.find({ org_id, contact_id: { $in: ... } })` — every field in the response (status, lost_reason, lost_stage, ...) comes from *this org's* `Lead` document. A Contact who's a Lead in two orgs can never surface one org's Lead state while being searched from the other's Leads screen.
+
+**Bulk actions**, both workflow-related per the RBAC table (`WORKFLOW_ACCESS_ROLES` — same access as building/running a workflow; BD-Lead Gen gets neither):
+- `POST /orgs/{orgId}/saved-lists` (optionally seeded with `lead_ids`) and `POST /orgs/{orgId}/saved-lists/{id}/leads` — "enroll selected leads into a SavedList," new-list and add-to-existing paths respectively. `GET /orgs/{orgId}/saved-lists` lists an org's SavedLists (needed for a UI to offer an existing list to add to, or to pick a list for the next action). Every `lead_ids` entry is checked against `Lead.find({ _id: { $in }, org_id })` before being trusted — an id for a Lead in a different org (or a nonexistent id) is dropped, reported via `skipped_count`, never silently added.
+- "Enroll a SavedList directly into a WorkflowTemplate" — **already built and exposed**, nothing new needed: `POST /orgs/{orgId}/workflow-templates/{templateId}/enrollments` (`enrollment.service.ts`'s `enrollSavedList`, PR #26) already does exactly this.
+
+No pagination on `GET /orgs/{orgId}/leads` — matches every other list endpoint in this codebase (`workflow-templates`, `email-templates`), none of which paginate either. Worth revisiting before a large org's Leads screen ships, since Lead volume is likely to dwarf template counts.
 
 ## Domain purpose model — `Organization.sending_domains[]`
 
