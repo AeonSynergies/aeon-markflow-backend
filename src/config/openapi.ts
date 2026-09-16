@@ -243,6 +243,152 @@ export function buildOpenApiSpec(): object {
               },
             ],
           },
+          SenderMailboxInput: {
+            type: 'object',
+            required: ['address'],
+            properties: {
+              address: { type: 'string' },
+              display_name: { type: 'string', nullable: true },
+              status: { type: 'string', enum: ['active', 'inactive'] },
+            },
+          },
+          SendingDomainInput: {
+            type: 'object',
+            required: ['domain', 'purpose'],
+            properties: {
+              domain: { type: 'string' },
+              purpose: { type: 'string', enum: ['marketing', 'transactional', 'alerts'] },
+              mailboxes: { type: 'array', items: { $ref: '#/components/schemas/SenderMailboxInput' } },
+            },
+          },
+          UpdateOrganizationSettingsRequest: {
+            type: 'object',
+            properties: {
+              enabled_features: { type: 'array', items: { type: 'string' } },
+              sending_domains: { type: 'array', items: { $ref: '#/components/schemas/SendingDomainInput' } },
+              send_time_strategy: { type: 'string', enum: ['manual', 'ai_suggested', 'ai_automatic'] },
+            },
+          },
+          SendingDomainResponse: {
+            allOf: [
+              { $ref: '#/components/schemas/SendingDomainInput' },
+              {
+                type: 'object',
+                properties: {
+                  mailboxes: {
+                    type: 'array',
+                    items: {
+                      allOf: [
+                        { $ref: '#/components/schemas/SenderMailboxInput' },
+                        { type: 'object', properties: { status: { type: 'string', enum: ['active', 'inactive'] } } },
+                      ],
+                    },
+                  },
+                },
+              },
+            ],
+          },
+          OrganizationSettingsResponse: {
+            type: 'object',
+            properties: {
+              _id: { type: 'string' },
+              name: { type: 'string' },
+              enabled_features: { type: 'array', items: { type: 'string' } },
+              product_context: { type: 'string' },
+              brand_voice_guidelines_id: { type: 'string', nullable: true },
+              sending_domains: { type: 'array', items: { $ref: '#/components/schemas/SendingDomainResponse' } },
+              send_time_strategy: { type: 'string', enum: ['manual', 'ai_suggested', 'ai_automatic'] },
+              createdAt: { type: 'string', format: 'date-time' },
+              updatedAt: { type: 'string', format: 'date-time' },
+            },
+          },
+          CreateUserAccessGrantRequest: {
+            type: 'object',
+            required: ['user_id', 'app', 'role'],
+            properties: {
+              user_id: { type: 'string' },
+              app: { type: 'string', enum: ['markflow', 'onboard'] },
+              org_id: {
+                type: 'string',
+                nullable: true,
+                description: 'Omit to default to the URL org id; null means all orgs.',
+              },
+              role: {
+                type: 'string',
+                enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES'],
+              },
+              features: { type: 'array', items: { type: 'string' } },
+            },
+          },
+          UpdateUserAccessGrantRequest: {
+            type: 'object',
+            properties: {
+              role: {
+                type: 'string',
+                enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES'],
+              },
+              features: { type: 'array', items: { type: 'string' } },
+            },
+          },
+          UserAccessGrantResponse: {
+            type: 'object',
+            properties: {
+              _id: { type: 'string' },
+              user_id: { type: 'string' },
+              user_email: { type: 'string', nullable: true },
+              app: { type: 'string', enum: ['markflow', 'onboard'] },
+              org_id: { type: 'string', nullable: true },
+              role: {
+                type: 'string',
+                enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES'],
+              },
+              features: { type: 'array', items: { type: 'string' } },
+              createdAt: { type: 'string', format: 'date-time' },
+              updatedAt: { type: 'string', format: 'date-time' },
+            },
+          },
+          UpsertGuardrailSettingsRequest: {
+            type: 'object',
+            properties: {
+              ramp_up_starting_daily_cap: { type: 'number' },
+              ramp_up_step_multiplier: { type: 'number' },
+              ramp_up_step_interval_days: { type: 'number' },
+              ramp_up_steady_state_daily_cap: { type: 'number' },
+              guardrail_short_window_hours: { type: 'number' },
+              guardrail_long_window_days: { type: 'number' },
+              guardrail_min_sample_size: { type: 'number' },
+              throttle_bounce_rate: { type: 'number' },
+              throttle_complaint_rate: { type: 'number' },
+              hard_stop_bounce_rate: { type: 'number' },
+              hard_stop_complaint_rate: { type: 'number' },
+            },
+          },
+          GuardrailSettingsResponse: {
+            allOf: [
+              { $ref: '#/components/schemas/UpsertGuardrailSettingsRequest' },
+              {
+                type: 'object',
+                properties: {
+                  org_id: { type: 'string' },
+                  domain: { type: 'string' },
+                  has_override: { type: 'boolean' },
+                  overridden_fields: { type: 'array', items: { type: 'string' } },
+                },
+              },
+            ],
+          },
+          UpdateBrandVoiceGuidelinesRequest: {
+            type: 'object',
+            required: ['text'],
+            properties: { text: { type: 'string' } },
+          },
+          BrandVoiceGuidelinesResponse: {
+            type: 'object',
+            properties: {
+              text: { type: 'string' },
+              version: { type: 'string' },
+            },
+          },
         },
       },
     },

@@ -1,24 +1,11 @@
 import type { Role } from '../constants/access';
-import {
-  GUARDRAIL_LONG_WINDOW_DAYS,
-  GUARDRAIL_MIN_SAMPLE_SIZE,
-  GUARDRAIL_SHORT_WINDOW_HOURS,
-  HARD_STOP_BOUNCE_RATE,
-  HARD_STOP_COMPLAINT_RATE,
-  RAMP_UP_STARTING_DAILY_CAP,
-  RAMP_UP_STEADY_STATE_DAILY_CAP,
-  RAMP_UP_STEP_INTERVAL_DAYS,
-  RAMP_UP_STEP_MULTIPLIER,
-  THROTTLE_BOUNCE_RATE,
-  THROTTLE_COMPLAINT_RATE,
-  type GuardrailAction,
-  type SendEventKind,
-} from '../constants/sendGuardrail';
+import { type GuardrailAction, type SendEventKind } from '../constants/sendGuardrail';
 import { TEMPLATE_APPROVER_ROLES } from '../constants/emailTemplate';
 import { DomainGuardrailState } from '../models/DomainGuardrailState.model';
 import { DomainSendEvent } from '../models/DomainSendEvent.model';
 import { ReviewTask } from '../models/ReviewTask.model';
 import { UnauthorizedApproverRoleError } from './emailTemplateVersion.service';
+import { GUARDRAIL_SETTINGS_DEFAULTS, resolveGuardrailSettings } from './guardrailSettings.service';
 import { sendInternalNotification } from './internalNotification.service';
 
 export interface GuardrailDecision {
@@ -59,8 +46,9 @@ function rateBreach(
   windowLabel: string,
   bounceThreshold: number,
   complaintThreshold: number,
+  minSampleSize: number,
 ): RateBreach {
-  if (counts.sent < GUARDRAIL_MIN_SAMPLE_SIZE) return { breached: false };
+  if (counts.sent < minSampleSize) return { breached: false };
 
   const bounceRate = counts.bounced / counts.sent;
   if (bounceRate >= bounceThreshold) {
@@ -84,19 +72,26 @@ function rateBreach(
 /**
  * The ramp-up daily cap for one mailbox on a domain, based on how long ago *that mailbox* first
  * sent anything — not how long the domain itself has been sending. A newly added mailbox has no
- * DomainSendEvent rows of its own yet, so this always starts it fresh at RAMP_UP_STARTING_DAILY_CAP
+ * DomainSendEvent rows of its own yet, so this always starts it fresh at the starting daily cap
  * regardless of how established the domain (or its other mailboxes) already are.
+ *
+ * The starting cap, step multiplier/interval, and steady-state cap all come from
+ * `resolveGuardrailSettings` (an optional per-(org, domain) override over the hardcoded defaults
+ * in src/constants/sendGuardrail.ts) when `orgId` is given, or the hardcoded defaults directly
+ * when it's omitted — this function's own math is unchanged either way.
  */
-export async function getRampCapForMailbox(domain: string, mailbox: string): Promise<number> {
+export async function getRampCapForMailbox(domain: string, mailbox: string, orgId?: string): Promise<number> {
+  const settings = orgId ? await resolveGuardrailSettings(orgId, domain) : GUARDRAIL_SETTINGS_DEFAULTS;
+
   const firstSend = await DomainSendEvent.findOne({ domain, mailbox, kind: 'sent' })
     .sort({ createdAt: 1 })
     .lean();
-  if (!firstSend) return RAMP_UP_STARTING_DAILY_CAP;
+  if (!firstSend) return settings.rampUpStartingDailyCap;
 
   const daysSinceFirstSend = Math.floor((Date.now() - firstSend.createdAt.getTime()) / 86_400_000);
-  const steps = Math.floor(daysSinceFirstSend / RAMP_UP_STEP_INTERVAL_DAYS);
-  const cap = RAMP_UP_STARTING_DAILY_CAP * RAMP_UP_STEP_MULTIPLIER ** steps;
-  return Math.min(cap, RAMP_UP_STEADY_STATE_DAILY_CAP);
+  const steps = Math.floor(daysSinceFirstSend / settings.rampUpStepIntervalDays);
+  const cap = settings.rampUpStartingDailyCap * settings.rampUpStepMultiplier ** steps;
+  return Math.min(cap, settings.rampUpSteadyStateDailyCap);
 }
 
 /**
@@ -244,18 +239,32 @@ export async function canSend(
     };
   }
 
-  const shortSince = new Date(Date.now() - GUARDRAIL_SHORT_WINDOW_HOURS * 60 * 60 * 1000);
-  const longSince = new Date(Date.now() - GUARDRAIL_LONG_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const settings = await resolveGuardrailSettings(orgId, domain);
+
+  const shortSince = new Date(Date.now() - settings.guardrailShortWindowHours * 60 * 60 * 1000);
+  const longSince = new Date(Date.now() - settings.guardrailLongWindowDays * 24 * 60 * 60 * 1000);
   const [shortCounts, longCounts] = await Promise.all([
     windowCounts(domain, mailbox, shortSince),
     windowCounts(domain, mailbox, longSince),
   ]);
 
-  const shortLabel = `${GUARDRAIL_SHORT_WINDOW_HOURS}h`;
-  const longLabel = `${GUARDRAIL_LONG_WINDOW_DAYS}d`;
+  const shortLabel = `${settings.guardrailShortWindowHours}h`;
+  const longLabel = `${settings.guardrailLongWindowDays}d`;
 
-  const shortHardStop = rateBreach(shortCounts, shortLabel, HARD_STOP_BOUNCE_RATE, HARD_STOP_COMPLAINT_RATE);
-  const longHardStop = rateBreach(longCounts, longLabel, HARD_STOP_BOUNCE_RATE, HARD_STOP_COMPLAINT_RATE);
+  const shortHardStop = rateBreach(
+    shortCounts,
+    shortLabel,
+    settings.hardStopBounceRate,
+    settings.hardStopComplaintRate,
+    settings.guardrailMinSampleSize,
+  );
+  const longHardStop = rateBreach(
+    longCounts,
+    longLabel,
+    settings.hardStopBounceRate,
+    settings.hardStopComplaintRate,
+    settings.guardrailMinSampleSize,
+  );
   const hardStop = shortHardStop.breached ? shortHardStop : longHardStop;
 
   if (hardStop.breached) {
@@ -268,10 +277,12 @@ export async function canSend(
   }
 
   const throttled =
-    rateBreach(shortCounts, shortLabel, THROTTLE_BOUNCE_RATE, THROTTLE_COMPLAINT_RATE).breached ||
-    rateBreach(longCounts, longLabel, THROTTLE_BOUNCE_RATE, THROTTLE_COMPLAINT_RATE).breached;
+    rateBreach(shortCounts, shortLabel, settings.throttleBounceRate, settings.throttleComplaintRate, settings.guardrailMinSampleSize)
+      .breached ||
+    rateBreach(longCounts, longLabel, settings.throttleBounceRate, settings.throttleComplaintRate, settings.guardrailMinSampleSize)
+      .breached;
 
-  const baseCap = await getRampCapForMailbox(domain, mailbox);
+  const baseCap = await getRampCapForMailbox(domain, mailbox, orgId);
   const dailyCap = throttled ? Math.max(1, Math.floor(baseCap / 2)) : baseCap;
   const sentInWindow = shortCounts.sent;
 

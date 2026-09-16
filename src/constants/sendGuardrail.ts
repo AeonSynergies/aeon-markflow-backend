@@ -18,6 +18,13 @@ export type GuardrailAction = (typeof GUARDRAIL_ACTIONS)[number];
  * send. Treat every constant in this section as a proposal for a human to review and adjust —
  * the code that *uses* them (ramp-up stepping, throttle vs. hard-stop) is the part that should
  * be trusted, not these specific thresholds.
+ *
+ * These are now fallback defaults, not the only source: a per-(org, domain) override can replace
+ * any of them via GuardrailSettings (src/models/GuardrailSettings.model.ts, the Settings screen's
+ * `GET/PUT/DELETE /orgs/{orgId}/guardrail-settings/{domain}`) — see
+ * `guardrailSettings.service.ts`'s `resolveGuardrailSettings()`, the only place
+ * `sendGuardrail.service.ts` reads these numbers from now. An (org, domain) pair with no override
+ * resolves to exactly the values below, unchanged.
  */
 
 /** Day-1 daily send cap for a domain/mailbox with no send history. */

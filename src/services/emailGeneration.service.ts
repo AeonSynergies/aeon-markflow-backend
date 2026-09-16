@@ -198,7 +198,7 @@ export async function generateEmailDraft(input: GenerateDraftInput): Promise<Gen
 
   const persona = template.persona ?? undefined;
   const orgId = template.org_id.toString();
-  const brandVoice = getBrandVoiceGuidelines();
+  const brandVoice = await getBrandVoiceGuidelines();
 
   const referenceExamples: ReferenceTemplateExample[] = [];
   if (input.request.type === 'new_template' && input.request.seedOrgKey) {
