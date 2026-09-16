@@ -904,6 +904,58 @@
             "type": "string"
           }
         }
+      },
+      "MeResponse": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "email": {
+                "type": "string"
+              }
+            }
+          },
+          "org_access": {
+            "type": "object",
+            "properties": {
+              "all_orgs": {
+                "type": "boolean"
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "SUPER_ADMIN",
+                    "ADMIN",
+                    "BD_ADMIN",
+                    "BD_MANAGER",
+                    "BD_LEAD_GEN",
+                    "BD_SALES"
+                  ]
+                }
+              }
+            }
+          },
+          "orgs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -1451,6 +1503,30 @@
           },
           "404": {
             "description": "Not found"
+          }
+        }
+      }
+    },
+    "/me": {
+      "get": {
+        "summary": "The authenticated user's own identity, MarkFlow role(s), and accessible orgs",
+        "description": "Not org-scoped — this is what a client calls *before* it knows which org to scope anything else to (the org switcher, and every role-gated nav link, are built from this). org_access.roles is the same flat, not-per-org set requireRole itself checks: a user holding different roles in different orgs is not distinguished here, matching how the backend actually enforces access today.\n",
+        "tags": [
+          "Me"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired token"
           }
         }
       }

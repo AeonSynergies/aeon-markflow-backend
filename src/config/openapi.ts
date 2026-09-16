@@ -389,6 +389,41 @@ export function buildOpenApiSpec(): object {
               version: { type: 'string' },
             },
           },
+          MeResponse: {
+            type: 'object',
+            properties: {
+              user: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  email: { type: 'string' },
+                },
+              },
+              org_access: {
+                type: 'object',
+                properties: {
+                  all_orgs: { type: 'boolean' },
+                  roles: {
+                    type: 'array',
+                    items: {
+                      type: 'string',
+                      enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES'],
+                    },
+                  },
+                },
+              },
+              orgs: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    name: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
         },
       },
     },
