@@ -4,7 +4,10 @@ import type { EmailDeliverabilityStatus, LeadStatus } from '../constants/lead';
 
 export interface ListLeadsFilters {
   status?: LeadStatus;
-  /** The Recycled/Win-back segment — status: RECLAIMED, regardless of `status`. RBAC-gated by the caller (route layer), not here. */
+  /** The Recycled/Win-back segment — status RECLAIMED or DISCOVERY_RETRY, regardless of `status`.
+   * Both tiers of "came back from a lost Deal" share this one segment; the frontend distinguishes
+   * them by status label/badge/secondary-line, not by a separate filter. RBAC-gated by the caller
+   * (route layer), not here. */
   recycledSegment?: boolean;
   /** Case-insensitive substring match against the lead's Contact name or company. */
   search?: string;
@@ -82,7 +85,7 @@ export async function listLeadsForOrg(orgId: string, filters: ListLeadsFilters =
   const query: Record<string, unknown> = { org_id: orgId };
 
   if (filters.recycledSegment) {
-    query.status = 'RECLAIMED';
+    query.status = { $in: ['RECLAIMED', 'DISCOVERY_RETRY'] };
   } else if (filters.status) {
     query.status = filters.status;
   }
@@ -101,4 +104,15 @@ export async function listLeadsForOrg(orgId: string, filters: ListLeadsFilters =
   const contactsById = new Map(contacts.map((contact) => [contact._id.toString(), contact as ContactDocument]));
 
   return leads.map((lead) => toLeadListItem(lead, contactsById.get(lead.contact_id.toString())));
+}
+
+/** One Lead, enriched from its shared Contact the same way listLeadsForOrg's rows are — used by
+ * leadRecycle.service.ts's callers to build a response after mutating a Lead directly, rather
+ * than duplicating the Contact-join logic above. Null if leadId doesn't belong to orgId. */
+export async function getLeadForOrg(orgId: string, leadId: string): Promise<LeadListItem | null> {
+  const lead = await Lead.findOne({ _id: leadId, org_id: orgId }).lean();
+  if (!lead) return null;
+
+  const contact = await Contact.findById(lead.contact_id).lean();
+  return toLeadListItem(lead, contact ? (contact as ContactDocument) : undefined);
 }

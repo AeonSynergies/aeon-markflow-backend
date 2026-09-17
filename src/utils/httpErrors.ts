@@ -14,6 +14,7 @@ const STATUS_BY_ERROR_NAME: Record<string, number> = {
   // GET/PATCH /orgs/{orgId}/organization — falling through to a bare 500 until now.
   OrganizationNotFoundError: 404,
   UserAccessGrantNotFoundError: 404,
+  LeadNotFoundError: 404,
 };
 
 /** Maps a thrown error to an HTTP status code for the global Express error handler. */

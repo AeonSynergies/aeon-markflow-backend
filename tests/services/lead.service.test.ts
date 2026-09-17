@@ -1,9 +1,9 @@
-jest.mock('../../src/models/Lead.model', () => ({ Lead: { find: jest.fn() } }));
-jest.mock('../../src/models/Contact.model', () => ({ Contact: { find: jest.fn() } }));
+jest.mock('../../src/models/Lead.model', () => ({ Lead: { find: jest.fn(), findOne: jest.fn() } }));
+jest.mock('../../src/models/Contact.model', () => ({ Contact: { find: jest.fn(), findById: jest.fn() } }));
 
 import { Contact } from '../../src/models/Contact.model';
 import { Lead } from '../../src/models/Lead.model';
-import { listLeadsForOrg } from '../../src/services/lead.service';
+import { getLeadForOrg, listLeadsForOrg } from '../../src/services/lead.service';
 
 function sortLean(value: unknown) {
   return { sort: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(value) }) };
@@ -60,12 +60,12 @@ describe('lead.service listLeadsForOrg', () => {
     expect(Lead.find).toHaveBeenCalledWith({ org_id: 'org-1', status: 'PROSPECT' });
   });
 
-  it('the recycled segment filter forces status RECLAIMED regardless of any status filter given', async () => {
+  it('the recycled segment filter forces status RECLAIMED or DISCOVERY_RETRY regardless of any status filter given', async () => {
     (Lead.find as jest.Mock).mockReturnValue(sortLean([]));
 
     await listLeadsForOrg('org-1', { status: 'PROSPECT', recycledSegment: true });
 
-    expect(Lead.find).toHaveBeenCalledWith({ org_id: 'org-1', status: 'RECLAIMED' });
+    expect(Lead.find).toHaveBeenCalledWith({ org_id: 'org-1', status: { $in: ['RECLAIMED', 'DISCOVERY_RETRY'] } });
   });
 
   it('surfaces lost_reason/lost_stage in the response for a recycled lead', async () => {
@@ -124,5 +124,43 @@ describe('lead.service listLeadsForOrg', () => {
 
     expect(leads).toEqual([]);
     expect(Contact.find).not.toHaveBeenCalled();
+  });
+
+  describe('getLeadForOrg', () => {
+    it('returns the enriched lead when it belongs to the org', async () => {
+      (Lead.findOne as jest.Mock).mockReturnValue(
+        lean({
+          _id: { toString: () => 'lead-1' },
+          org_id: { toString: () => 'org-1' },
+          contact_id: { toString: () => 'contact-1' },
+          status: 'DISCOVERY_RETRY',
+          email_deliverability: 'GOOD',
+          phone_dnd_status: false,
+          lost_reason: 'no_show',
+          lost_stage: 'discovery',
+          createdAt: new Date('2026-01-01'),
+          updatedAt: new Date('2026-01-01'),
+        }),
+      );
+      (Contact.findById as jest.Mock).mockReturnValue(
+        lean({ _id: { toString: () => 'contact-1' }, name: 'Jane Doe', company: 'Acme DSP' }),
+      );
+
+      const lead = await getLeadForOrg('org-1', 'lead-1');
+
+      expect(Lead.findOne).toHaveBeenCalledWith({ _id: 'lead-1', org_id: 'org-1' });
+      expect(lead).toEqual(
+        expect.objectContaining({ leadId: 'lead-1', status: 'DISCOVERY_RETRY', name: 'Jane Doe', lostReason: 'no_show' }),
+      );
+    });
+
+    it('returns null when no lead matches the org', async () => {
+      (Lead.findOne as jest.Mock).mockReturnValue(lean(null));
+
+      const lead = await getLeadForOrg('org-1', 'lead-1');
+
+      expect(lead).toBeNull();
+      expect(Contact.findById).not.toHaveBeenCalled();
+    });
   });
 });

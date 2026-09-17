@@ -149,6 +149,7 @@ export function buildOpenApiSpec(): object {
                   'PROSPECT',
                   'INACTIVE',
                   'RECLAIMED',
+                  'DISCOVERY_RETRY',
                 ],
               },
               email_deliverability: { type: 'string', enum: ['GOOD', 'LOW', 'BAD'] },
@@ -159,6 +160,19 @@ export function buildOpenApiSpec(): object {
               eligible_for_reengagement_at: { type: 'string', format: 'date-time', nullable: true },
               createdAt: { type: 'string', format: 'date-time' },
               updatedAt: { type: 'string', format: 'date-time' },
+            },
+          },
+          RecycleLeadRequest: {
+            type: 'object',
+            required: ['deal_id', 'lost_reason', 'lost_stage'],
+            properties: {
+              deal_id: { type: 'string' },
+              lost_reason: {
+                type: 'string',
+                description: 'Free text. "no_show" or "cancelled_discovery" route to DISCOVERY_RETRY instead of RECLAIMED.',
+              },
+              lost_stage: { type: 'string' },
+              eligible_for_reengagement_at: { type: 'string', format: 'date-time' },
             },
           },
           CreateSavedListRequest: {

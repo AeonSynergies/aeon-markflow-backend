@@ -1,6 +1,8 @@
 import { connectDatabase } from './config/database';
 import { scheduleCrossOrgInsightComputation } from './queues/crossOrgInsightQueue';
 import { startCrossOrgInsightWorker } from './queues/crossOrgInsightWorker';
+import { scheduleDiscoveryRetryGraduation } from './queues/discoveryRetryQueue';
+import { startDiscoveryRetryWorker } from './queues/discoveryRetryWorker';
 import { scheduleEmailPerformanceAnalysis } from './queues/emailAnalyticsQueue';
 import { startEmailAnalyticsWorker } from './queues/emailAnalyticsWorker';
 import { startEnrollmentWorker } from './queues/enrollmentWorker';
@@ -45,6 +47,13 @@ async function main(): Promise<void> {
     console.error(`Cross-org insight job ${job?.id} failed:`, error);
   });
   await scheduleCrossOrgInsightComputation();
+
+  const discoveryRetryWorker = startDiscoveryRetryWorker();
+  discoveryRetryWorker.on('failed', (job, error) => {
+    // eslint-disable-next-line no-console
+    console.error(`Discovery-retry graduation job ${job?.id} failed:`, error);
+  });
+  await scheduleDiscoveryRetryGraduation();
 
   // eslint-disable-next-line no-console
   console.log('Enrollment worker started');

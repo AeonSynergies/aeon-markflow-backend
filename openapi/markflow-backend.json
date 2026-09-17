@@ -307,7 +307,8 @@
               "CONTACTED-EMAIL",
               "PROSPECT",
               "INACTIVE",
-              "RECLAIMED"
+              "RECLAIMED",
+              "DISCOVERY_RETRY"
             ]
           },
           "email_deliverability": {
@@ -343,6 +344,30 @@
             "format": "date-time"
           },
           "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RecycleLeadRequest": {
+        "type": "object",
+        "required": [
+          "deal_id",
+          "lost_reason",
+          "lost_stage"
+        ],
+        "properties": {
+          "deal_id": {
+            "type": "string"
+          },
+          "lost_reason": {
+            "type": "string",
+            "description": "Free text. \"no_show\" or \"cancelled_discovery\" route to DISCOVERY_RETRY instead of RECLAIMED."
+          },
+          "lost_stage": {
+            "type": "string"
+          },
+          "eligible_for_reengagement_at": {
             "type": "string",
             "format": "date-time"
           }
@@ -1717,7 +1742,7 @@
     "/orgs/{orgId}/leads": {
       "get": {
         "summary": "List/filter/search Leads for an org",
-        "description": "Open to every role with org access, including BD-Lead Gen (view/upload/monitor only, per the RBAC table) — no workflow-related action happens here. `segment=recycled` narrows to the Recycled/Win-back segment (status RECLAIMED, with lost_reason/lost_stage populated) and is itself gated to BD-Sales/BD-Manager/Admin/Super Admin; any other role requesting it gets 403 rather than a silently-filtered result. `search` matches the lead's Contact name/company — since a Contact can be a Lead in more than one org, this always resolves back to *this org's own* Lead record, never another org's.\n",
+        "description": "Open to every role with org access, including BD-Lead Gen (view/upload/monitor only, per the RBAC table) — no workflow-related action happens here. `segment=recycled` narrows to the Recycled/Win-back segment (status RECLAIMED or DISCOVERY_RETRY, with lost_reason/lost_stage populated) and is itself gated to BD-Sales/BD-Manager/Admin/Super Admin; any other role requesting it gets 403 rather than a silently-filtered result. `search` matches the lead's Contact name/company — since a Contact can be a Lead in more than one org, this always resolves back to *this org's own* Lead record, never another org's.\n",
         "tags": [
           "Leads"
         ],
@@ -1744,7 +1769,8 @@
                 "CONTACTED-EMAIL",
                 "PROSPECT",
                 "INACTIVE",
-                "RECLAIMED"
+                "RECLAIMED",
+                "DISCOVERY_RETRY"
               ]
             }
           },
@@ -1752,7 +1778,7 @@
             "in": "query",
             "name": "segment",
             "required": false,
-            "description": "Pass \"recycled\" for the Recycled/Win-back segment (status RECLAIMED).",
+            "description": "Pass \"recycled\" for the Recycled/Win-back segment (status RECLAIMED or DISCOVERY_RETRY).\n",
             "schema": {
               "type": "string",
               "enum": [
@@ -1786,6 +1812,61 @@
           },
           "403": {
             "description": "segment=recycled requested by a role outside RECYCLED_SEGMENT_ROLES"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/leads/{leadId}/recycle": {
+      "post": {
+        "summary": "Receive the Lost+Recycle event for one Lead",
+        "description": "The receiving side of the Onboard → MarkFlow Lost+Recycle event (see CLAUDE.md's \"Repos, backend separation\" section) — Onboard's own build is still deferred, so nothing calls this yet; it's exercised directly today (tests, or calling it by hand) until a real webhook takes over that job. Sets recycled_from_deal_id/lost_reason/lost_stage/ eligible_for_reengagement_at, and routes status to DISCOVERY_RETRY when lost_reason is no_show or cancelled_discovery (a Discovery call was already booked — urgent reschedule-focused follow-up), otherwise RECLAIMED (the general win-back tier).\n",
+        "tags": [
+          "Leads"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "leadId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecycleLeadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing deal_id, lost_reason, or lost_stage"
+          },
+          "404": {
+            "description": "Not found"
           }
         }
       }

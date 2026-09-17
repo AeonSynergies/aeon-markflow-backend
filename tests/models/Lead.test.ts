@@ -36,6 +36,7 @@ describe('Lead model', () => {
       'PROSPECT',
       'INACTIVE',
       'RECLAIMED',
+      'DISCOVERY_RETRY',
     ];
     for (const status of statuses) {
       const doc = new Lead({ contact_id, org_id, status });
@@ -63,5 +64,24 @@ describe('Lead model', () => {
       eligible_for_reengagement_at: new Date('2026-01-01'),
     });
     expect(doc.validateSync()).toBeUndefined();
+  });
+
+  it('allows discovery_retry_started_at for a lead in the DISCOVERY_RETRY tier', () => {
+    const doc = new Lead({
+      contact_id,
+      org_id,
+      status: 'DISCOVERY_RETRY',
+      recycled_from_deal_id: new Types.ObjectId(),
+      lost_reason: 'no_show',
+      lost_stage: 'discovery',
+      discovery_retry_started_at: new Date('2026-01-01'),
+    });
+    expect(doc.validateSync()).toBeUndefined();
+    expect(doc.discovery_retry_started_at).toEqual(new Date('2026-01-01'));
+  });
+
+  it('defaults discovery_retry_started_at to null', () => {
+    const doc = new Lead({ contact_id, org_id });
+    expect(doc.discovery_retry_started_at).toBeNull();
   });
 });
