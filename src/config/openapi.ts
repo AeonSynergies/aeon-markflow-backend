@@ -214,6 +214,57 @@ export function buildOpenApiSpec(): object {
               updatedAt: { type: 'string', format: 'date-time' },
             },
           },
+          RejectEmailTemplateVersionRequest: {
+            type: 'object',
+            required: ['reason'],
+            properties: { reason: { type: 'string' } },
+          },
+          ResubmitEmailTemplateVersionRequest: {
+            type: 'object',
+            properties: {
+              subject_line: { type: 'string' },
+              body_html: { type: 'string' },
+            },
+          },
+          CreateAiDraftEmailTemplateVersionRequest: {
+            type: 'object',
+            required: ['brief'],
+            properties: {
+              persona: { type: 'string' },
+              workflow_position: { type: 'string' },
+              brief: { type: 'string' },
+            },
+          },
+          ReviewTaskResponse: {
+            type: 'object',
+            properties: {
+              _id: { type: 'string' },
+              org_id: { type: 'string' },
+              kind: {
+                type: 'string',
+                enum: [
+                  'email_template_version',
+                  'domain_guardrail',
+                  'email_version_deliverability',
+                  'send_time_recommendation',
+                  'lead_unsubscribe_request',
+                ],
+              },
+              email_template_version_id: { type: 'string', nullable: true },
+              domain: { type: 'string', nullable: true },
+              mailbox: { type: 'string', nullable: true },
+              send_time_recommendation_id: { type: 'string', nullable: true },
+              lead_id: { type: 'string', nullable: true },
+              lead_activity_id: { type: 'string', nullable: true },
+              status: { type: 'string', enum: ['OPEN', 'APPROVED', 'REJECTED'] },
+              requested_by: { type: 'string', nullable: true },
+              reviewed_by: { type: 'string', nullable: true },
+              reviewed_at: { type: 'string', format: 'date-time', nullable: true },
+              rejection_reason: { type: 'string', nullable: true },
+              createdAt: { type: 'string', format: 'date-time' },
+              updatedAt: { type: 'string', format: 'date-time' },
+            },
+          },
           CrossOrgInsightResponse: {
             type: 'object',
             properties: {
@@ -315,7 +366,7 @@ export function buildOpenApiSpec(): object {
               },
               role: {
                 type: 'string',
-                enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES'],
+                enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES', 'BD_MARKETING'],
               },
               features: { type: 'array', items: { type: 'string' } },
             },
@@ -325,7 +376,7 @@ export function buildOpenApiSpec(): object {
             properties: {
               role: {
                 type: 'string',
-                enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES'],
+                enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES', 'BD_MARKETING'],
               },
               features: { type: 'array', items: { type: 'string' } },
             },
@@ -340,7 +391,7 @@ export function buildOpenApiSpec(): object {
               org_id: { type: 'string', nullable: true },
               role: {
                 type: 'string',
-                enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES'],
+                enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES', 'BD_MARKETING'],
               },
               features: { type: 'array', items: { type: 'string' } },
               createdAt: { type: 'string', format: 'date-time' },

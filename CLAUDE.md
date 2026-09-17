@@ -2,11 +2,11 @@
 
 Working context for building **Aeon MarkFlow**, Aeon Synergies' sales & marketing engagement platform. Companion to **Aeon Onboard** (`AeonSynergies/aeon-onboard`, `AeonSynergies/aeon-onboard-backend`) — currently being cloned and migrated from Vercel (internal-testing only, no live data) to the same new AWS account MarkFlow will live in, with schema additions layered on top rather than a rewrite.
 
-Full reasoning for every decision below lives in the project's 27-section requirements doc — ask for it if something here needs more depth.
+Full reasoning for every decision below lives in `docs/requirements.md` (30 sections) — ask for it if something here needs more depth.
 
 ## What this app is
 
-MarkFlow owns everything **before** a deal is priced: Leads, the marketing/engagement workflow engine (email/call/SMS sequences), and Discovery call management. The moment a Discovery Meeting is scheduled and marked "Interested," a Deal hands off to Aeon Onboard, which owns pricing, contracts, payment, and client management from there. MarkFlow never touches pricing, contracts, or billing.
+MarkFlow owns everything **before** a deal is priced: Leads, the marketing/engagement workflow engine (email/call/SMS sequences), and Discovery call management. The moment a Discovery Meeting is *scheduled* (not at any later outcome — see the Discovery handoff timing note further down), a Deal hands off to Aeon Onboard, which owns Discovery itself, pricing, contracts, payment, and client management from there. MarkFlow never touches pricing, contracts, or billing.
 
 ## Repos, backend separation, and shared auth
 
@@ -207,6 +207,47 @@ Recipients default to the mailbox itself (a shared inbox a team monitors togethe
 
 ⚠️ **Manual step before relying on this in production**: confirm the `notifications@aeonsynergies.com` shared mailbox actually exists in the Aeon Synergies M365 tenant, and that the existing Graph app registration's Mail.Send permission covers it (if an Exchange Application Access Policy scopes that app to specific mailboxes, add this one). Not something this codebase can verify or provision itself — an ops task. Until confirmed, sends fail silently (logged, not thrown) rather than blocking the ReviewTask/pause they're attached to.
 
+## Template review actions — approve/reject/resubmit, and listing open ReviewTasks — built
+
+✅ **Done.** Until this work, `PENDING_APPROVAL` `EmailTemplateVersion`s had no HTTP-reachable way to be acted on at all — `approveVersion`/`rejectVersion`/`resubmitVersion` existed and were fully tested at the service layer, but nothing routed to them, and the frontend's Template Review queue (`aeon-markflow`) was read-only for exactly that reason. Added:
+
+- `POST /orgs/{orgId}/email-templates/{templateId}/versions/{versionId}/approve` — `PENDING_APPROVAL` → `APPROVED`, sets `EmailTemplate.current_version_id`, closes the open `ReviewTask` (`status: APPROVED`). Gated `TEMPLATE_APPROVER_ROLES` (see the RBAC correction above).
+- `.../reject` — `PENDING_APPROVAL` → `REJECTED`, requires a non-blank `reason` in the body (400 without one), closes the `ReviewTask` with that reason recorded. Same gate.
+- `.../resubmit` — chains `resubmitVersion` (`REJECTED` → `RESUBMITTED`, applying optional edits) with `submitForReview` (→ `PENDING_APPROVAL`, opens a fresh `ReviewTask`) into one call, since `resubmitVersion` alone leaves nothing for a reviewer to act on. Gated `WORKFLOW_ACCESS_ROLES`, not `TEMPLATE_APPROVER_ROLES` — resubmitting is the original author's move, not a reviewer's.
+- `GET /orgs/{orgId}/review-tasks` (new `reviewTask.routes.ts`/`.service.ts`) — lists a org's `ReviewTask`s, defaulting to `status=OPEN`, with optional `status`/`kind` filters. Gated `WORKFLOW_ACCESS_ROLES`. This is what lets a Review queue UI list what's actually open directly, instead of inferring "pending" from `EmailTemplateVersion.status` alone.
+
+**Deliberate path deviation**: nested all four under the existing `/orgs/{orgId}/email-templates/{templateId}/versions/{versionId}/...` sub-resource (reusing `resolveVersionForOrg`'s existing not-found-not-forbidden masking) rather than the unscoped `/email-template-versions/:id/...` shape floated when this was requested — every other resource in this API is org-scoped in its path, and an unscoped version route would be the only exception.
+
+**Was open, now partly closed**: `submitForReview`'s *other* call site — the original `DRAFT` → `PENDING_APPROVAL` submission — still has no HTTP route, but `createAiDraftVersion` itself now does (see "BD-Marketing role and on-demand AI drafts" below). So a caller can now create an AI `DRAFT` version over HTTP, but still cannot submit it for review over HTTP — it stays `DRAFT` until either a human uses whatever non-HTTP path exists today, or a future task adds that route too.
+
+## BD-Marketing role and on-demand AI drafts — built
+
+✅ **Done.** Three related additions:
+
+1. **New `BD_MARKETING` role** (`src/constants/access.ts`'s `ROLES`). It replaces `BD_SALES` in `TEMPLATE_APPROVER_ROLES` (now `SUPER_ADMIN`/`ADMIN`/`BD_ADMIN`/`BD_MANAGER`/`BD_MARKETING` — `BD_ADMIN` was also added) and, since `sendGuardrail.service.ts`'s `resumeDomain` imports `TEMPLATE_APPROVER_ROLES` directly rather than duplicating it, its "human signed off" gate for resuming a paused mailbox picked up the identical change automatically — no separate edit needed there, just confirmed by reading it. `BD_SALES` is unaffected everywhere else (it keeps its full `WORKFLOW_ACCESS_ROLES` membership — building/running workflows — it just no longer approves/rejects template *content* specifically).
+
+   `BD_MARKETING` was also added to `WORKFLOW_ACCESS_ROLES` — **not explicitly asked for, but required**: the frontend nav shows BD-Marketing the Workflows/Template Review/Template Library links, and every one of those pages' own endpoints (`workflowTemplate.routes`, `emailTemplate.routes`' listing/usages/versions/resubmit, `reviewTask.routes`) is gated on this exact role list; leaving `BD_MARKETING` out would mean showing nav links that 403, which this codebase's own established convention (see the frontend `aeon-markflow` CLAUDE.md) says never to do. **Known, accepted imprecision this carries over**: `WORKFLOW_ACCESS_ROLES` also gates `savedList.routes`' bulk lead-list/enrollment endpoints, so `BD_MARKETING` is technically able to call those directly even though the RBAC table's intent is "no Lead access — that's sales' job." There is no existing narrower role set that separates "template/workflow access" from "lead bulk-action access," and building one is out of scope here. The frontend simply never shows the Leads nav link, the Recycled/Win-back filter, or the bulk-select UI to BD-Marketing — same shown-vs-403 discipline as every other role-based hide, just enforced entirely at the nav layer rather than the API layer for this one role. If this gap ever needs closing, it means splitting `WORKFLOW_ACCESS_ROLES` into two role sets, which touches every route listed above.
+
+2. **`POST /orgs/{orgId}/email-templates/{templateId}/versions/ai-draft`** — wraps `createAiDraftVersion` (previously only reachable from the internal Phase 6 diagnosis job) in an HTTP route. Body: `persona`/`workflow_position` (both optional, folded into the generation instructions — the `EmailTemplate`'s own stored `persona`/`workflow_position` already drive reference-example lookup inside `generateEmailDraft` regardless, so these aren't the sole source of truth for either) and `brief` (required — the actual content ask; 400 without one). Gated `TEMPLATE_APPROVER_ROLES`, deliberately narrower than `WORKFLOW_ACCESS_ROLES` — the same people who'd ultimately review the draft are the ones trusted to spend a generation call producing it. Always produces a `DRAFT`, never auto-submits it for review — same human-in-the-loop gate as every other draft, AI-generated or not. See the still-open gap noted above: there's now an easier way to reach a `DRAFT` with no HTTP path to move it out of `DRAFT`.
+
+3. **`RECYCLED_SEGMENT_ROLES`** also gets `BD_ADMIN` and `BD_MARKETING` added (`BD_SALES` stays — see the RBAC table above for why this is additive, not a swap like `TEMPLATE_APPROVER_ROLES`).
+
+## Planned, not yet built: BD-Sales narrowing + Discovery handoff timing
+
+⏳ **Decided, not started** — this is real planning, kept here so it isn't lost, but no code in this repo reflects it yet. Confirmed out of scope until Onboard's own build resumes, since most of it lives on Onboard's side.
+
+- **BD-Sales (narrowed, spans both apps)**: MarkFlow — calling, discovery/onboarding meeting scheduling, entering pricing after discovery (likely moves to Onboard entirely once Onboard's build resumes). Onboard — negotiation, deal actions, pricing continuation. Not yet reflected in `WORKFLOW_ACCESS_ROLES`/`TEMPLATE_APPROVER_ROLES`/anywhere else in this codebase — BD-Sales still has its full pre-narrowing access today.
+- **Discovery handoff timing, no-show/retry handling, and pricing location — finalized design, not built**:
+  - **Handoff timing**: fires at **Discovery Meeting Scheduled**, not at the "Interested" outcome (the intro section above already reflects this as the decided design). Deal created in Onboard the moment scheduling happens; Discovery itself becomes Onboard's domain, not MarkFlow's.
+  - **No-show / cancelled**: fires the Lost+Recycle mechanism immediately, landing the prospect back in MarkFlow with a new status, **`DISCOVERY_RETRY`** — a distinct, fast-cadence tier from `RECLAIMED`, living in MarkFlow (not Onboard) so it stays worked by MarkFlow's own reminder engine rather than getting buried in Onboard's Deal list. **This is the one piece of this design that's real MarkFlow-side work and buildable now independent of Onboard** — flagged separately rather than silently bundled into whatever task reads this next.
+  - **Reschedule (before any no-show)**: stays in Onboard — just a status/time update via the Aeon Scheduler webhook, no cross-app event.
+  - **`DISCOVERY_RETRY` successfully reschedules**: the handoff mechanism fires again normally.
+  - **`DISCOVERY_RETRY` sits 30 days with no successful reschedule**: automatically graduates to `RECLAIMED` (same win-back mechanism, slower cadence).
+  - **"Follow-up Required"**: stays in Onboard, same treatment as reschedule.
+  - **"Not Interested" (Lost after the call)**: Lost+Recycle mechanism, same as any other post-call loss.
+  - **Pricing entry**: happens directly in Onboard once the Deal exists there — no MarkFlow pricing UI or cross-app sync channel.
+  - **New vocabulary needed**: `DISCOVERY_RETRY` as a distinct `Lead.status`, plus `no_show`/`cancelled_discovery` lost reasons feeding it, alongside the existing ones feeding `RECLAIMED` for post-call losses.
+
 ## Go-live status: send-time/content-pattern optimization (Phase 7)
 
 ✅ **Built.** `sendTimePerformance.service.ts`'s `computeSendTimeRollups()` recomputes every `SendTimePerformance` bucket on a rolling basis (last `SEND_TIME_ROLLUP_LOOKBACK_DAYS`, not all-time) from `EmailEngagement` rows — each send is bucketed by the **recipient's own local** day-of-week/hour (via `Contact.timezone`, falling back to UTC when unknown — never the server's timezone; see `src/utils/timezone.ts`). Target metric is reply rate / meeting-booked, same as everywhere else — **never open rate**. `sendTimeOptimization.service.ts`'s `runSendTimeOptimization()` (scheduled daily by `sendTimePerformanceQueue.ts`/`Worker.ts`, also callable on demand) then evaluates every (org, workflow_type, persona) group belonging to an org whose `send_time_strategy` isn't `"manual"`:
@@ -281,12 +322,15 @@ DKIM setup continues regardless (valuable for deliverability to every provider).
 | BD Manager | Full lead + workflow access |
 | BD-Lead Gen | Upload/monitor leads only — no workflow, no email/call access |
 | BD-Sales | Full workflow access (build, run) |
+| BD-Marketing | Template/workflow access (Workflows, Template Review, Template Library) — no Lead access; leads are sales' pipeline, not marketing's |
 
-Recycled/Win-back lead segment visible to: BD-Sales, BD-Manager, Admin only.
+Recycled/Win-back lead segment (`RECYCLED_SEGMENT_ROLES`) visible to: BD-Sales, BD-Manager, BD-Marketing, BD Admin, Admin, Super Admin. Updated when BD-Marketing was introduced: win-back re-engagement is a workflow/email concern (BD-Marketing's job to run), but once a recycled lead responds it needs a discovery call booked — BD-Sales' job again — so this wasn't a swap like `TEMPLATE_APPROVER_ROLES` was; both need visibility. BD Admin was added for the same hierarchy-consistency reason as its `TEMPLATE_APPROVER_ROLES` inclusion. This set is now identical to `WORKFLOW_ACCESS_ROLES` — no longer the deliberately-narrower-by-excluding-BD-Admin subset it used to be.
 
 Raw cross-org insight data (`GET /cross-org-insights/raw`, Phase 8) visible to: Super Admin, Admin only — see `ADMIN_ONLY_ROLES`. Everyone with workflow access still sees the generic, coarse-labeled recommendations at `GET /cross-org-insights`.
 
-Org-level configuration — `Organization` settings, `UserAccessGrant` management, `GuardrailSettings`, Brand Voice guidelines — visible/editable to: Super Admin, Admin only (`ADMIN_ONLY_ROLES`, same set as raw cross-org insight data). This is a new rule as of the Settings screen backend, not something CLAUDE.md documented before it: only Admin/Super Admin may grant or edit `UserAccessGrant`s at all, which is stricter than `WORKFLOW_ACCESS_ROLES` (BD Admin/BD Manager/BD Sales included there have no access to any of this). See "Settings screen backend" below.
+Org-level configuration — `Organization` settings, `UserAccessGrant` management, `GuardrailSettings`, Brand Voice guidelines — visible/editable to: Super Admin, Admin only (`ADMIN_ONLY_ROLES`, same set as raw cross-org insight data). This is a new rule as of the Settings screen backend, not something CLAUDE.md documented before it: only Admin/Super Admin may grant or edit `UserAccessGrant`s at all, which is stricter than `WORKFLOW_ACCESS_ROLES` (BD Admin/BD Manager/BD Sales/BD-Marketing included there have no access to any of this). See "Settings screen backend" below.
+
+Who may approve/reject an `EmailTemplateVersion` — `TEMPLATE_APPROVER_ROLES` (`src/constants/emailTemplate.ts`) — is **Super Admin, Admin, BD Admin, BD Manager, BD-Marketing** (updated when the BD-Marketing role was introduced — see "BD-Marketing role" below; previously Super Admin/Admin/BD Manager/BD-Sales, which itself corrected an even earlier guess of "BD Admin/BD Manager" — this table row keeps drifting because it isn't the source of truth, `src/constants/emailTemplate.ts` is; check the constant directly rather than trusting this line to be current).
 
 ## Integration points and current status
 
