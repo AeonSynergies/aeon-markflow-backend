@@ -1055,7 +1055,8 @@
                     "BD_ADMIN",
                     "BD_MANAGER",
                     "BD_LEAD_GEN",
-                    "BD_SALES"
+                    "BD_SALES",
+                    "BD_MARKETING"
                   ]
                 }
               }

@@ -458,7 +458,7 @@ export function buildOpenApiSpec(): object {
                     type: 'array',
                     items: {
                       type: 'string',
-                      enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES'],
+                      enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES', 'BD_MARKETING'],
                     },
                   },
                 },
