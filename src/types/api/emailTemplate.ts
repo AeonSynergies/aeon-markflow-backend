@@ -50,3 +50,16 @@ export interface ResubmitEmailTemplateVersionRequest {
   subject_line?: string;
   body_html?: string;
 }
+
+/**
+ * persona/workflow_position are optional context folded into the generation instructions —
+ * the EmailTemplate's own persona/workflow_position fields (see EmailTemplateResponse) already
+ * drive reference-example lookup inside generateEmailDraft, so these aren't the sole source of
+ * truth for either; they just let a caller steer this specific draft without editing the
+ * template's stored metadata. brief is the actual content ask and is required.
+ */
+export interface CreateAiDraftEmailTemplateVersionRequest {
+  persona?: string;
+  workflow_position?: string;
+  brief: string;
+}

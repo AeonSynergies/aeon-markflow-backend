@@ -34,4 +34,8 @@ export type GenerationSource = (typeof GENERATION_SOURCES)[number];
 // never auto-applies — only these roles may approve or reject an EmailTemplateVersion. Also
 // reused by SendGuardrail for resuming a paused domain (src/services/sendGuardrail.service.ts) —
 // an equally consequential "a human signed off on this" action.
-export const TEMPLATE_APPROVER_ROLES: Role[] = ['SUPER_ADMIN', 'ADMIN', 'BD_MANAGER', 'BD_SALES'];
+// Updated for the BD-Marketing role: BD-Marketing owns template content end to end (including
+// review), so it replaces BD-Sales here; BD-Admin was added alongside it. BD-Sales keeps its
+// broader WORKFLOW_ACCESS_ROLES membership (building/running workflows) — it just no longer
+// approves/rejects template content specifically.
+export const TEMPLATE_APPROVER_ROLES: Role[] = ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_MARKETING'];

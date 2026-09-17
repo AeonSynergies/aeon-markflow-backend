@@ -14,6 +14,7 @@ import {
   EmailTemplateNotFoundError,
   EmailTemplateVersionNotFoundError,
   approveVersion,
+  createAiDraftVersion,
   getEmailTemplateVersion,
   listEmailTemplateVersions,
   rejectVersion,
@@ -21,6 +22,7 @@ import {
   submitForReview,
 } from '../services/emailTemplateVersion.service';
 import type {
+  CreateAiDraftEmailTemplateVersionRequest,
   EmailTemplateResponse,
   EmailTemplateUsageResponse,
   EmailTemplateVersionResponse,
@@ -186,9 +188,9 @@ export async function rejectEmailTemplateVersionHandler(
  * Resubmit is one HTTP action covering two service calls (resubmitVersion, then
  * submitForReview) — resubmitVersion alone would leave the version at RESUBMITTED with no fresh
  * OPEN ReviewTask, which isn't actionable by anyone. There's still no standalone HTTP route for
- * submitForReview's other caller (the *original* DRAFT → PENDING_APPROVAL submission, e.g. after
- * `createAiDraftVersion`) — that's a separate, pre-existing gap (the whole AI-draft-creation flow
- * has no HTTP routes at all yet), out of scope here.
+ * submitForReview's *other* caller — the original DRAFT → PENDING_APPROVAL submission, including
+ * for a version this same file's createAiDraftEmailTemplateVersionHandler just created — see that
+ * handler's own doc comment.
  */
 export async function resubmitEmailTemplateVersionHandler(
   req: Request,
@@ -202,6 +204,55 @@ export async function resubmitEmailTemplateVersionHandler(
     await resubmitVersion(version._id.toString(), { subjectLine: body.subject_line, bodyHtml: body.body_html });
     const resubmitted = await submitForReview(version._id.toString(), req.user?.id);
     res.json(toEmailTemplateVersionResponse(resubmitted));
+  } catch (error) {
+    next(error);
+  }
+}
+
+function composeAiDraftInstructions(body: CreateAiDraftEmailTemplateVersionRequest): string {
+  const context = [
+    body.persona ? `Persona: ${body.persona}.` : null,
+    body.workflow_position ? `Workflow position: ${body.workflow_position}.` : null,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join(' ');
+
+  return context ? `${context} ${body.brief}` : body.brief;
+}
+
+/**
+ * Generates a new AI DRAFT version on demand — the only other caller of createAiDraftVersion
+ * today is the internal Phase 6 diagnosis job. Gated to TEMPLATE_APPROVER_ROLES (narrower than
+ * WORKFLOW_ACCESS_ROLES, which can only view templates): the same people who'd ultimately review
+ * this draft are the ones trusted to spend a generation call producing it.
+ *
+ * Deliberately does NOT call submitForReview — per CLAUDE.md's human-in-the-loop rule, this stays
+ * DRAFT until a human reads it and explicitly submits it, same as a hand-authored draft. That
+ * submission still has no HTTP route (see resubmitEmailTemplateVersionHandler's doc comment) —
+ * this endpoint makes that gap more visible, not less, since it's now easier to reach a DRAFT
+ * with no way to move it forward over HTTP.
+ */
+export async function createAiDraftEmailTemplateVersionHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const templateId = getParam(req, 'templateId');
+    const template = await getEmailTemplate(templateId);
+    assertBelongsToOrg(template, getParam(req, 'orgId'));
+
+    const body = req.body as CreateAiDraftEmailTemplateVersionRequest;
+    if (!body.brief?.trim()) {
+      res.status(400).json({ error: 'brief is required' });
+      return;
+    }
+
+    const draft = await createAiDraftVersion(templateId, {
+      type: 'new_template',
+      instructions: composeAiDraftInstructions(body),
+    });
+    res.status(201).json(toEmailTemplateVersionResponse(draft));
   } catch (error) {
     next(error);
   }
@@ -352,9 +403,9 @@ emailTemplateRouter.get(
  *     description: >
  *       Transitions the version to APPROVED, sets it as the parent EmailTemplate's
  *       current_version_id, and closes (status: APPROVED) the ReviewTask opened when it was
- *       submitted for review. Gated to TEMPLATE_APPROVER_ROLES (SUPER_ADMIN, ADMIN, BD_MANAGER,
- *       BD_SALES) — this is the same, already-finalized role set `resumeDomain` on
- *       SendGuardrail reuses for its own "human signed off" gate; it does not include BD_ADMIN.
+ *       submitted for review. Gated to TEMPLATE_APPROVER_ROLES (SUPER_ADMIN, ADMIN, BD_ADMIN,
+ *       BD_MANAGER, BD_MARKETING) — the same role set `resumeDomain` on SendGuardrail reuses for
+ *       its own "human signed off" gate.
  *     tags: [EmailTemplates]
  *     parameters:
  *       - in: path
@@ -483,4 +534,50 @@ emailTemplateRouter.post(
   requireOrgAccess(getOrgIdParam),
   requireRole(WORKFLOW_ACCESS_ROLES),
   resubmitEmailTemplateVersionHandler,
+);
+
+/**
+ * @openapi
+ * /orgs/{orgId}/email-templates/{templateId}/versions/ai-draft:
+ *   post:
+ *     summary: Generate a new AI draft version for this template on demand
+ *     description: >
+ *       Wraps createAiDraftVersion (previously only reachable from the internal Phase 6
+ *       diagnosis job) behind an HTTP route. persona/workflow_position are optional context
+ *       folded into the generation instructions — the EmailTemplate's own stored persona/
+ *       workflow_position already drive reference-example lookup regardless. brief is the actual
+ *       content ask and is required. Always creates a DRAFT — never auto-submits it for review,
+ *       per the human-in-the-loop rule. Gated to TEMPLATE_APPROVER_ROLES, not
+ *       WORKFLOW_ACCESS_ROLES.
+ *     tags: [EmailTemplates]
+ *     parameters:
+ *       - in: path
+ *         name: orgId
+ *         required: true
+ *         schema: { type: string }
+ *       - in: path
+ *         name: templateId
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { $ref: '#/components/schemas/CreateAiDraftEmailTemplateVersionRequest' }
+ *     responses:
+ *       201:
+ *         description: Created
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/EmailTemplateVersionResponse' }
+ *       400:
+ *         description: Missing brief
+ *       404:
+ *         description: Not found
+ */
+emailTemplateRouter.post(
+  '/orgs/:orgId/email-templates/:templateId/versions/ai-draft',
+  requireOrgAccess(getOrgIdParam),
+  requireRole(TEMPLATE_APPROVER_ROLES),
+  createAiDraftEmailTemplateVersionHandler,
 );

@@ -498,6 +498,23 @@
           }
         }
       },
+      "CreateAiDraftEmailTemplateVersionRequest": {
+        "type": "object",
+        "required": [
+          "brief"
+        ],
+        "properties": {
+          "persona": {
+            "type": "string"
+          },
+          "workflow_position": {
+            "type": "string"
+          },
+          "brief": {
+            "type": "string"
+          }
+        }
+      },
       "ReviewTaskResponse": {
         "type": "object",
         "properties": {
@@ -834,7 +851,8 @@
               "BD_ADMIN",
               "BD_MANAGER",
               "BD_LEAD_GEN",
-              "BD_SALES"
+              "BD_SALES",
+              "BD_MARKETING"
             ]
           },
           "features": {
@@ -856,7 +874,8 @@
               "BD_ADMIN",
               "BD_MANAGER",
               "BD_LEAD_GEN",
-              "BD_SALES"
+              "BD_SALES",
+              "BD_MARKETING"
             ]
           },
           "features": {
@@ -899,7 +918,8 @@
               "BD_ADMIN",
               "BD_MANAGER",
               "BD_LEAD_GEN",
-              "BD_SALES"
+              "BD_SALES",
+              "BD_MARKETING"
             ]
           },
           "features": {
@@ -2024,7 +2044,7 @@
     "/orgs/{orgId}/email-templates/{templateId}/versions/{versionId}/approve": {
       "post": {
         "summary": "Approve a PENDING_APPROVAL email template version",
-        "description": "Transitions the version to APPROVED, sets it as the parent EmailTemplate's current_version_id, and closes (status: APPROVED) the ReviewTask opened when it was submitted for review. Gated to TEMPLATE_APPROVER_ROLES (SUPER_ADMIN, ADMIN, BD_MANAGER, BD_SALES) — this is the same, already-finalized role set `resumeDomain` on SendGuardrail reuses for its own \"human signed off\" gate; it does not include BD_ADMIN.\n",
+        "description": "Transitions the version to APPROVED, sets it as the parent EmailTemplate's current_version_id, and closes (status: APPROVED) the ReviewTask opened when it was submitted for review. Gated to TEMPLATE_APPROVER_ROLES (SUPER_ADMIN, ADMIN, BD_ADMIN, BD_MANAGER, BD_MARKETING) — the same role set `resumeDomain` on SendGuardrail reuses for its own \"human signed off\" gate.\n",
         "tags": [
           "EmailTemplates"
         ],
@@ -2199,6 +2219,61 @@
           },
           "400": {
             "description": "Version is not in a state that can be resubmitted"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/email-templates/{templateId}/versions/ai-draft": {
+      "post": {
+        "summary": "Generate a new AI draft version for this template on demand",
+        "description": "Wraps createAiDraftVersion (previously only reachable from the internal Phase 6 diagnosis job) behind an HTTP route. persona/workflow_position are optional context folded into the generation instructions — the EmailTemplate's own stored persona/ workflow_position already drive reference-example lookup regardless. brief is the actual content ask and is required. Always creates a DRAFT — never auto-submits it for review, per the human-in-the-loop rule. Gated to TEMPLATE_APPROVER_ROLES, not WORKFLOW_ACCESS_ROLES.\n",
+        "tags": [
+          "EmailTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAiDraftEmailTemplateVersionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailTemplateVersionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing brief"
           },
           "404": {
             "description": "Not found"

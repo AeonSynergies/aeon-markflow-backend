@@ -226,6 +226,15 @@ export function buildOpenApiSpec(): object {
               body_html: { type: 'string' },
             },
           },
+          CreateAiDraftEmailTemplateVersionRequest: {
+            type: 'object',
+            required: ['brief'],
+            properties: {
+              persona: { type: 'string' },
+              workflow_position: { type: 'string' },
+              brief: { type: 'string' },
+            },
+          },
           ReviewTaskResponse: {
             type: 'object',
             properties: {
@@ -357,7 +366,7 @@ export function buildOpenApiSpec(): object {
               },
               role: {
                 type: 'string',
-                enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES'],
+                enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES', 'BD_MARKETING'],
               },
               features: { type: 'array', items: { type: 'string' } },
             },
@@ -367,7 +376,7 @@ export function buildOpenApiSpec(): object {
             properties: {
               role: {
                 type: 'string',
-                enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES'],
+                enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES', 'BD_MARKETING'],
               },
               features: { type: 'array', items: { type: 'string' } },
             },
@@ -382,7 +391,7 @@ export function buildOpenApiSpec(): object {
               org_id: { type: 'string', nullable: true },
               role: {
                 type: 'string',
-                enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES'],
+                enum: ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_LEAD_GEN', 'BD_SALES', 'BD_MARKETING'],
               },
               features: { type: 'array', items: { type: 'string' } },
               createdAt: { type: 'string', format: 'date-time' },
