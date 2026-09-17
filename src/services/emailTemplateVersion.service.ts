@@ -8,6 +8,7 @@ import { EmailTemplate } from '../models/EmailTemplate.model';
 import { EmailTemplateVersion, type EmailTemplateVersionDocument } from '../models/EmailTemplateVersion.model';
 import { ReviewTask } from '../models/ReviewTask.model';
 import { generateEmailDraft, type GenerationRequest } from './emailGeneration.service';
+import { sendInternalNotification } from './internalNotification.service';
 
 export class EmailTemplateNotFoundError extends Error {
   constructor(id: string) {
@@ -52,6 +53,12 @@ function assertApproverRole(role: Role): void {
 async function nextVersionNumber(emailTemplateId: string): Promise<number> {
   const count = await EmailTemplateVersion.countDocuments({ email_template_id: emailTemplateId });
   return count + 1;
+}
+
+export async function getEmailTemplateVersion(versionId: string): Promise<EmailTemplateVersionDocument> {
+  const version = await EmailTemplateVersion.findById(versionId);
+  if (!version) throw new EmailTemplateVersionNotFoundError(versionId);
+  return version;
 }
 
 /**
@@ -119,6 +126,11 @@ export async function submitForReview(
     org_id: template.org_id,
     email_template_version_id: version._id,
     requested_by: requestedByUserId ?? null,
+  });
+
+  await sendInternalNotification({
+    subject: '[MarkFlow] Email template version pending review',
+    html: `<p>EmailTemplateVersion ${version._id} (template ${version.email_template_id}) was submitted for review.</p>`,
   });
 
   return version;

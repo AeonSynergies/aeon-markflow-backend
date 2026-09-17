@@ -12,9 +12,20 @@ export interface EmailTemplateResponse {
   name: string;
   persona?: string;
   workflow_position?: string;
+  intended_workflow_type?: string;
   current_version_id?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** One WorkflowTemplate step currently pinned to a version of the queried EmailTemplate. */
+export interface EmailTemplateUsageResponse {
+  workflow_template_id: string;
+  workflow_template_name: string;
+  workflow_type: string | null;
+  step_index: number;
+  email_template_version_id: string;
+  version_number: number;
 }
 
 export interface EmailTemplateVersionResponse {
@@ -28,4 +39,27 @@ export interface EmailTemplateVersionResponse {
   status: EmailTemplateVersionStatus;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface RejectEmailTemplateVersionRequest {
+  reason: string;
+}
+
+/** Both optional — resubmitting without edits (e.g. after a purely external fix) is valid. */
+export interface ResubmitEmailTemplateVersionRequest {
+  subject_line?: string;
+  body_html?: string;
+}
+
+/**
+ * persona/workflow_position are optional context folded into the generation instructions —
+ * the EmailTemplate's own persona/workflow_position fields (see EmailTemplateResponse) already
+ * drive reference-example lookup inside generateEmailDraft, so these aren't the sole source of
+ * truth for either; they just let a caller steer this specific draft without editing the
+ * template's stored metadata. brief is the actual content ask and is required.
+ */
+export interface CreateAiDraftEmailTemplateVersionRequest {
+  persona?: string;
+  workflow_position?: string;
+  brief: string;
 }

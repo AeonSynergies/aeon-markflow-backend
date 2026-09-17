@@ -1,5 +1,13 @@
 import { connectDatabase } from './config/database';
+import { scheduleCrossOrgInsightComputation } from './queues/crossOrgInsightQueue';
+import { startCrossOrgInsightWorker } from './queues/crossOrgInsightWorker';
+import { scheduleEmailPerformanceAnalysis } from './queues/emailAnalyticsQueue';
+import { startEmailAnalyticsWorker } from './queues/emailAnalyticsWorker';
 import { startEnrollmentWorker } from './queues/enrollmentWorker';
+import { scheduleMailboxPolling } from './queues/mailboxPollQueue';
+import { startMailboxPollWorker } from './queues/mailboxPollWorker';
+import { scheduleSendTimeOptimization } from './queues/sendTimePerformanceQueue';
+import { startSendTimePerformanceWorker } from './queues/sendTimePerformanceWorker';
 
 async function main(): Promise<void> {
   await connectDatabase();
@@ -9,6 +17,34 @@ async function main(): Promise<void> {
     // eslint-disable-next-line no-console
     console.error(`Enrollment step job ${job?.id} failed:`, error);
   });
+
+  const mailboxPollWorker = startMailboxPollWorker();
+  mailboxPollWorker.on('failed', (job, error) => {
+    // eslint-disable-next-line no-console
+    console.error(`Mailbox poll job ${job?.id} failed:`, error);
+  });
+  await scheduleMailboxPolling();
+
+  const emailAnalyticsWorker = startEmailAnalyticsWorker();
+  emailAnalyticsWorker.on('failed', (job, error) => {
+    // eslint-disable-next-line no-console
+    console.error(`Email analytics job ${job?.id} failed:`, error);
+  });
+  await scheduleEmailPerformanceAnalysis();
+
+  const sendTimePerformanceWorker = startSendTimePerformanceWorker();
+  sendTimePerformanceWorker.on('failed', (job, error) => {
+    // eslint-disable-next-line no-console
+    console.error(`Send-time performance job ${job?.id} failed:`, error);
+  });
+  await scheduleSendTimeOptimization();
+
+  const crossOrgInsightWorker = startCrossOrgInsightWorker();
+  crossOrgInsightWorker.on('failed', (job, error) => {
+    // eslint-disable-next-line no-console
+    console.error(`Cross-org insight job ${job?.id} failed:`, error);
+  });
+  await scheduleCrossOrgInsightComputation();
 
   // eslint-disable-next-line no-console
   console.log('Enrollment worker started');

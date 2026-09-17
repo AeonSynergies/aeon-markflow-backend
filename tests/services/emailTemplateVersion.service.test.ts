@@ -8,16 +8,20 @@ jest.mock('../../src/models/ReviewTask.model', () => ({
   ReviewTask: { create: jest.fn(), findOneAndUpdate: jest.fn() },
 }));
 jest.mock('../../src/services/emailGeneration.service', () => ({ generateEmailDraft: jest.fn() }));
+jest.mock('../../src/services/internalNotification.service', () => ({ sendInternalNotification: jest.fn() }));
 
 import { EmailTemplate } from '../../src/models/EmailTemplate.model';
 import { EmailTemplateVersion } from '../../src/models/EmailTemplateVersion.model';
 import { ReviewTask } from '../../src/models/ReviewTask.model';
 import { generateEmailDraft } from '../../src/services/emailGeneration.service';
+import { sendInternalNotification } from '../../src/services/internalNotification.service';
 import {
+  EmailTemplateVersionNotFoundError,
   InvalidTemplateVersionTransitionError,
   UnauthorizedApproverRoleError,
   approveVersion,
   createAiDraftVersion,
+  getEmailTemplateVersion,
   rejectVersion,
   resubmitVersion,
   submitForReview,
@@ -95,6 +99,9 @@ describe('emailTemplateVersion.service', () => {
         email_template_version_id: 'ver-1',
         requested_by: 'user-1',
       });
+      expect(sendInternalNotification).toHaveBeenCalledWith(
+        expect.objectContaining({ subject: expect.stringContaining('pending review') }),
+      );
     });
 
     it('also allows RESUBMITTED to move to PENDING_APPROVAL', async () => {
@@ -116,7 +123,7 @@ describe('emailTemplateVersion.service', () => {
     it('approves a PENDING_APPROVAL version for an authorized role and pins current_version_id', async () => {
       const version = mockVersion({ status: 'PENDING_APPROVAL' });
 
-      await approveVersion('ver-1', 'user-2', 'BD_SALES');
+      await approveVersion('ver-1', 'user-2', 'BD_MARKETING');
 
       expect(version.status).toBe('APPROVED');
       expect(ReviewTask.findOneAndUpdate).toHaveBeenCalledWith(
@@ -158,7 +165,7 @@ describe('emailTemplateVersion.service', () => {
 
     it('rejects an unauthorized role', async () => {
       mockVersion({ status: 'PENDING_APPROVAL' });
-      await expect(rejectVersion('ver-1', 'user-2', 'BD_ADMIN', 'no')).rejects.toThrow(
+      await expect(rejectVersion('ver-1', 'user-2', 'BD_SALES', 'no')).rejects.toThrow(
         UnauthorizedApproverRoleError,
       );
     });
@@ -186,6 +193,18 @@ describe('emailTemplateVersion.service', () => {
     it('rejects resubmitting a DRAFT version', async () => {
       mockVersion({ status: 'DRAFT' });
       await expect(resubmitVersion('ver-1')).rejects.toThrow(InvalidTemplateVersionTransitionError);
+    });
+  });
+
+  describe('getEmailTemplateVersion', () => {
+    it('returns the version when found', async () => {
+      const version = mockVersion();
+      await expect(getEmailTemplateVersion('ver-1')).resolves.toBe(version);
+    });
+
+    it('throws EmailTemplateVersionNotFoundError when missing', async () => {
+      (EmailTemplateVersion.findById as jest.Mock).mockResolvedValue(null);
+      await expect(getEmailTemplateVersion('ver-1')).rejects.toThrow(EmailTemplateVersionNotFoundError);
     });
   });
 });

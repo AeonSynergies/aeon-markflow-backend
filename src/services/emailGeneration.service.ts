@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { z } from 'zod';
+import type { DiagnosisSymptom } from '../constants/emailAnalytics';
 import { EmailTemplate } from '../models/EmailTemplate.model';
 import { getBrandVoiceGuidelines } from './brandVoice.service';
 import { getLeadEmailThread, type ThreadMessage } from './leadThread.service';
@@ -33,7 +34,20 @@ export interface ReplyDraftGenerationRequest {
   instructions: string;
 }
 
-export type GenerationRequest = NewTemplateGenerationRequest | ReplyDraftGenerationRequest;
+/**
+ * A revision proposed by the diagnosis-by-symptom pipeline (see
+ * emailPerformanceAnalysis.service.ts). Never used for 'high_bounce_rate' — that symptom routes
+ * to SendGuardrail, not a content rewrite, so no revision request is ever built for it.
+ */
+export interface DiagnosisRevisionRequest {
+  type: 'diagnosis_revision';
+  symptom: Exclude<DiagnosisSymptom, 'high_bounce_rate'>;
+  diagnosisReason: string;
+  currentSubjectLine: string;
+  currentBodyHtml: string;
+}
+
+export type GenerationRequest = NewTemplateGenerationRequest | ReplyDraftGenerationRequest | DiagnosisRevisionRequest;
 
 export interface GenerateDraftInput {
   emailTemplateId: string;
@@ -96,7 +110,44 @@ function formatLeadThread(thread: ThreadMessage[]): string {
     .join('\n\n');
 }
 
-function buildSystemPrompt(params: { brandVoiceText: string; referenceBlock: string; threadBlock?: string }): string {
+const DIAGNOSIS_INSTRUCTIONS: Record<Exclude<DiagnosisSymptom, 'high_bounce_rate'>, string> = {
+  low_open_rate:
+    'The diagnosis is a LOW OPEN RATE relative to this org\'s baseline. Rewrite ONLY the subject ' +
+    'line to be more compelling — keep the body content, structure, and CTA exactly as given ' +
+    'below, unchanged. (Open rate is a weak signal on its own — this is worth testing, not a ' +
+    'confirmed fix.)',
+  no_click_through:
+    'The diagnosis is OPENED BUT NOT CLICKED. Rewrite the body to be clearer and more ' +
+    'compelling, with one strong, unambiguous call-to-action. Keep the subject line as given ' +
+    'below unless a small adjustment clearly helps the new body land — the body is the primary ' +
+    'problem here.',
+  no_reply_after_click:
+    'The diagnosis is CLICKS BUT NO REPLY. Soften the call-to-action — make it a lower-commitment ' +
+    'ask than what\'s given below — and/or note in your reason whether the next workflow step\'s ' +
+    'timing or channel should change instead. Keep the subject line and overall structure close ' +
+    'to the original unless softening the CTA requires a wording change.',
+};
+
+function buildDiagnosisBlock(request: DiagnosisRevisionRequest): string {
+  return [
+    `Diagnosis: ${request.diagnosisReason}`,
+    '',
+    DIAGNOSIS_INSTRUCTIONS[request.symptom],
+    '',
+    'Current subject line:',
+    request.currentSubjectLine,
+    '',
+    'Current body:',
+    request.currentBodyHtml,
+  ].join('\n');
+}
+
+function buildSystemPrompt(params: {
+  brandVoiceText: string;
+  referenceBlock: string;
+  threadBlock?: string;
+  diagnosisBlock?: string;
+}): string {
   return [
     "You are Aeon MarkFlow's email drafting assistant. Draft ONE email for a human reviewer " +
       'to approve — your output is never sent automatically, so draft your best attempt rather ' +
@@ -118,6 +169,16 @@ function buildSystemPrompt(params: { brandVoiceText: string; referenceBlock: str
           params.threadBlock,
         ]
       : []),
+    ...(params.diagnosisBlock
+      ? [
+          '',
+          '# You are revising an existing, already-approved email based on a performance diagnosis',
+          'This revision enters as a new A/B variant to test against the current version — it ' +
+            'does not replace it. Change only what the diagnosis calls for; preserve everything ' +
+            'else from the current version given below.',
+          params.diagnosisBlock,
+        ]
+      : []),
     '',
     'Respond with the drafted subject line and full HTML body only, per the required output schema.',
   ].join('\n');
@@ -137,7 +198,7 @@ export async function generateEmailDraft(input: GenerateDraftInput): Promise<Gen
 
   const persona = template.persona ?? undefined;
   const orgId = template.org_id.toString();
-  const brandVoice = getBrandVoiceGuidelines();
+  const brandVoice = await getBrandVoiceGuidelines();
 
   const referenceExamples: ReferenceTemplateExample[] = [];
   if (input.request.type === 'new_template' && input.request.seedOrgKey) {
@@ -151,11 +212,20 @@ export async function generateEmailDraft(input: GenerateDraftInput): Promise<Gen
     threadBlock = formatLeadThread(thread);
   }
 
+  const diagnosisBlock =
+    input.request.type === 'diagnosis_revision' ? buildDiagnosisBlock(input.request) : undefined;
+
   const systemPrompt = buildSystemPrompt({
     brandVoiceText: brandVoice.text,
     referenceBlock: formatReferenceTemplates(referenceExamples),
     threadBlock,
+    diagnosisBlock,
   });
+
+  const userMessage =
+    input.request.type === 'diagnosis_revision'
+      ? 'Apply the diagnosis above and produce the revised email.'
+      : input.request.instructions;
 
   try {
     const response = await getClient().messages.parse({
@@ -164,7 +234,7 @@ export async function generateEmailDraft(input: GenerateDraftInput): Promise<Gen
       thinking: { type: 'adaptive' },
       output_config: { effort: 'high', format: zodOutputFormat(EmailDraftSchema) },
       system: systemPrompt,
-      messages: [{ role: 'user', content: input.request.instructions }],
+      messages: [{ role: 'user', content: userMessage }],
     });
 
     if (!response.parsed_output) {

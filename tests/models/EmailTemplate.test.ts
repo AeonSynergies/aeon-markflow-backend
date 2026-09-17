@@ -25,4 +25,14 @@ describe('EmailTemplate model', () => {
     });
     expect(doc.validateSync()).toBeUndefined();
   });
+
+  it('accepts an intended_workflow_type label', () => {
+    const doc = new EmailTemplate({
+      org_id: new Types.ObjectId(),
+      name: 'FedEx ISP cold open',
+      intended_workflow_type: 'cold_outreach',
+    });
+    expect(doc.validateSync()).toBeUndefined();
+    expect(doc.intended_workflow_type).toBe('cold_outreach');
+  });
 });

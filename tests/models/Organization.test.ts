@@ -25,13 +25,120 @@ describe('Organization model', () => {
     expect(doc.sending_domains).toEqual([]);
   });
 
-  it('allows multiple sending domains for a single org', () => {
+  it('allows multiple sending domains for a single org, each tagged with a purpose', () => {
     const doc = new Organization({
       name: 'Aeon Miles',
       product_context: AEON_MILES_PRODUCT_CONTEXT,
-      sending_domains: ['aeonmiles.com', 'aeonsynergies.com'],
+      sending_domains: [
+        { domain: 'aeonmiles.com', purpose: 'marketing' },
+        { domain: 'aeonsynergies.com', purpose: 'transactional' },
+      ],
     });
     expect(doc.validateSync()).toBeUndefined();
     expect(doc.sending_domains).toHaveLength(2);
+    expect(doc.sending_domains?.[1]).toMatchObject({ domain: 'aeonsynergies.com', purpose: 'transactional' });
+  });
+
+  it('defaults a sending domain entry\'s mailboxes to an empty array', () => {
+    const doc = new Organization({
+      name: 'Aeon Miles',
+      product_context: AEON_MILES_PRODUCT_CONTEXT,
+      sending_domains: [{ domain: 'aeonmiles.com', purpose: 'marketing' }],
+    });
+    expect(doc.sending_domains?.[0].mailboxes).toEqual([]);
+  });
+
+  it('accepts a sending domain entry with several mailboxes, defaulting status to active', () => {
+    const doc = new Organization({
+      name: 'Aeon Miles',
+      product_context: AEON_MILES_PRODUCT_CONTEXT,
+      sending_domains: [
+        {
+          domain: 'aeonmiles.com',
+          purpose: 'marketing',
+          mailboxes: [
+            { address: 'alex@aeonmiles.com', display_name: 'Alex' },
+            { address: 'jordan@aeonmiles.com', status: 'inactive' },
+          ],
+        },
+      ],
+    });
+    expect(doc.validateSync()).toBeUndefined();
+    expect(doc.sending_domains?.[0].mailboxes).toHaveLength(2);
+    expect(doc.sending_domains?.[0].mailboxes?.[0]).toMatchObject({
+      address: 'alex@aeonmiles.com',
+      display_name: 'Alex',
+      status: 'active',
+    });
+    expect(doc.sending_domains?.[0].mailboxes?.[1]).toMatchObject({
+      address: 'jordan@aeonmiles.com',
+      status: 'inactive',
+    });
+  });
+
+  it('rejects a mailbox with an unknown status', () => {
+    const doc = new Organization({
+      name: 'Aeon Miles',
+      product_context: AEON_MILES_PRODUCT_CONTEXT,
+      sending_domains: [
+        {
+          domain: 'aeonmiles.com',
+          purpose: 'marketing',
+          mailboxes: [{ address: 'alex@aeonmiles.com', status: 'archived' }],
+        },
+      ],
+    });
+    const err = doc.validateSync();
+    expect(err?.errors['sending_domains.0.mailboxes.0.status']).toBeDefined();
+  });
+
+  it('rejects a sending domain with an unknown purpose', () => {
+    const doc = new Organization({
+      name: 'Aeon Miles',
+      product_context: AEON_MILES_PRODUCT_CONTEXT,
+      sending_domains: [{ domain: 'aeonmiles.com', purpose: 'promotional' }],
+    });
+    const err = doc.validateSync();
+    expect(err?.errors['sending_domains.0.purpose']).toBeDefined();
+  });
+
+  it('rejects a sending domain entry with no purpose', () => {
+    const doc = new Organization({
+      name: 'Aeon Miles',
+      product_context: AEON_MILES_PRODUCT_CONTEXT,
+      sending_domains: [{ domain: 'aeonmiles.com' }],
+    });
+    const err = doc.validateSync();
+    expect(err?.errors['sending_domains.0.purpose']).toBeDefined();
+  });
+
+  it('defaults send_time_strategy to manual', () => {
+    const doc = new Organization({ name: 'Aeon Miles', product_context: AEON_MILES_PRODUCT_CONTEXT });
+    expect(doc.send_time_strategy).toBe('manual');
+  });
+
+  it('accepts ai_suggested and ai_automatic send_time_strategy values', () => {
+    const suggested = new Organization({
+      name: 'Aeon Miles',
+      product_context: AEON_MILES_PRODUCT_CONTEXT,
+      send_time_strategy: 'ai_suggested',
+    });
+    expect(suggested.validateSync()).toBeUndefined();
+
+    const automatic = new Organization({
+      name: 'Aeon Sign',
+      product_context: AEON_MILES_PRODUCT_CONTEXT,
+      send_time_strategy: 'ai_automatic',
+    });
+    expect(automatic.validateSync()).toBeUndefined();
+  });
+
+  it('rejects an unknown send_time_strategy', () => {
+    const doc = new Organization({
+      name: 'Aeon Miles',
+      product_context: AEON_MILES_PRODUCT_CONTEXT,
+      send_time_strategy: 'fully_autonomous',
+    });
+    expect(doc.validateSync()?.errors.send_time_strategy).toBeDefined();
   });
 });

@@ -7,9 +7,13 @@ jest.mock('../../src/models/TrackedLink.model', () => ({
 jest.mock('../../src/services/linkTracking.service', () => ({
   recordClick: jest.fn(),
 }));
+jest.mock('../../src/services/emailEngagement.service', () => ({
+  recordOpen: jest.fn(),
+}));
 
 import { TrackedLink } from '../../src/models/TrackedLink.model';
-import { handleTrackingRedirect } from '../../src/routes/tracking.routes';
+import { handleOpenPixel, handleTrackingRedirect } from '../../src/routes/tracking.routes';
+import { recordOpen } from '../../src/services/emailEngagement.service';
 import { recordClick } from '../../src/services/linkTracking.service';
 
 function mockRes() {
@@ -17,6 +21,7 @@ function mockRes() {
     status: jest.fn().mockReturnThis(),
     end: jest.fn().mockReturnThis(),
     redirect: jest.fn().mockReturnThis(),
+    set: jest.fn().mockReturnThis(),
   };
   return res as Response;
 }
@@ -50,9 +55,8 @@ describe('handleTrackingRedirect', () => {
 
   it('records the click and redirects to the destination url', async () => {
     const id = new Types.ObjectId().toString();
-    (TrackedLink.findById as jest.Mock).mockReturnValue({
-      lean: jest.fn().mockResolvedValue({ destination_url: 'https://example.com/book' }),
-    });
+    const link = { _id: id, destination_url: 'https://example.com/book' };
+    (TrackedLink.findById as jest.Mock).mockReturnValue({ lean: jest.fn().mockResolvedValue(link) });
     (recordClick as jest.Mock).mockResolvedValueOnce(undefined);
 
     const req = {
@@ -65,7 +69,7 @@ describe('handleTrackingRedirect', () => {
 
     await handleTrackingRedirect(req, res, next);
 
-    expect(recordClick).toHaveBeenCalledWith(id, { ip: '1.2.3.4', userAgent: 'jest-agent' });
+    expect(recordClick).toHaveBeenCalledWith(link, { ip: '1.2.3.4', userAgent: 'jest-agent' });
     expect(res.redirect).toHaveBeenCalledWith(302, 'https://example.com/book');
   });
 
@@ -98,5 +102,45 @@ describe('handleTrackingRedirect', () => {
     await handleTrackingRedirect(req, res, next);
 
     expect(next).toHaveBeenCalledWith(error);
+  });
+});
+
+describe('handleOpenPixel', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('records the open and always returns a 1x1 gif', async () => {
+    const id = new Types.ObjectId().toString();
+    (recordOpen as jest.Mock).mockResolvedValueOnce(undefined);
+
+    const req = { params: { token: id } } as unknown as Request;
+    const res = mockRes();
+
+    await handleOpenPixel(req, res);
+
+    expect(recordOpen).toHaveBeenCalledWith(id);
+    expect(res.set).toHaveBeenCalledWith('Content-Type', 'image/gif');
+    expect(res.end).toHaveBeenCalledWith(expect.any(Buffer));
+  });
+
+  it('still returns the pixel when the token is malformed, without calling recordOpen', async () => {
+    const req = { params: { token: 'not-an-id' } } as unknown as Request;
+    const res = mockRes();
+
+    await handleOpenPixel(req, res);
+
+    expect(recordOpen).not.toHaveBeenCalled();
+    expect(res.end).toHaveBeenCalledWith(expect.any(Buffer));
+  });
+
+  it('still returns the pixel when recording fails', async () => {
+    const id = new Types.ObjectId().toString();
+    (recordOpen as jest.Mock).mockRejectedValueOnce(new Error('db down'));
+
+    const req = { params: { token: id } } as unknown as Request;
+    const res = mockRes();
+
+    await handleOpenPixel(req, res);
+
+    expect(res.end).toHaveBeenCalledWith(expect.any(Buffer));
   });
 });

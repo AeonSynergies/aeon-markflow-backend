@@ -1,45 +1,69 @@
 import { readFileSync } from 'fs';
 
 jest.mock('fs', () => ({ readFileSync: jest.fn() }));
+jest.mock('../../src/models/BrandVoiceGuidelines.model', () => ({
+  BrandVoiceGuidelines: { findOne: jest.fn(), findOneAndUpdate: jest.fn() },
+}));
 
-import { getBrandVoiceGuidelines, resetBrandVoiceGuidelinesCache } from '../../src/services/brandVoice.service';
+import { BrandVoiceGuidelines } from '../../src/models/BrandVoiceGuidelines.model';
+import { getBrandVoiceGuidelines, updateBrandVoiceGuidelines } from '../../src/services/brandVoice.service';
+
+function lean(value: unknown) {
+  return { lean: jest.fn().mockResolvedValue(value) };
+}
 
 describe('brandVoice.service', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    resetBrandVoiceGuidelinesCache();
+  afterEach(() => jest.clearAllMocks());
+
+  describe('getBrandVoiceGuidelines', () => {
+    it('falls back to brand-voice-guidelines.md and derives a stable content-hash version when nothing has been edited yet', async () => {
+      (BrandVoiceGuidelines.findOne as jest.Mock).mockReturnValue(lean(null));
+      (readFileSync as jest.Mock).mockReturnValue('# Aeon Brand Voice\n\nBe consultative.');
+
+      const result = await getBrandVoiceGuidelines();
+
+      expect(readFileSync).toHaveBeenCalledTimes(1);
+      expect(result.text).toContain('Be consultative');
+      expect(result.version).toMatch(/^[0-9a-f]{12}$/);
+    });
+
+    it('reads the stored document instead of the file once one exists', async () => {
+      (BrandVoiceGuidelines.findOne as jest.Mock).mockReturnValue(lean({ text: 'Edited voice.', version: 'abc123def456' }));
+
+      const result = await getBrandVoiceGuidelines();
+
+      expect(readFileSync).not.toHaveBeenCalled();
+      expect(result).toEqual({ text: 'Edited voice.', version: 'abc123def456' });
+    });
   });
 
-  it('reads brand-voice-guidelines.md and derives a stable content-hash version', () => {
-    (readFileSync as jest.Mock).mockReturnValue('# Aeon Brand Voice\n\nBe consultative.');
+  describe('updateBrandVoiceGuidelines', () => {
+    it('upserts the singleton document with a freshly-derived version', async () => {
+      (BrandVoiceGuidelines.findOneAndUpdate as jest.Mock).mockResolvedValue({
+        text: 'New voice.',
+        version: 'expected-hash',
+      });
 
-    const first = getBrandVoiceGuidelines();
-    expect(readFileSync).toHaveBeenCalledTimes(1);
-    expect(first.text).toContain('Be consultative');
-    expect(first.version).toMatch(/^[0-9a-f]{12}$/);
-  });
+      const result = await updateBrandVoiceGuidelines('New voice.', 'user-1');
 
-  it('caches the result across calls until reset', () => {
-    (readFileSync as jest.Mock).mockReturnValue('content');
+      expect(BrandVoiceGuidelines.findOneAndUpdate).toHaveBeenCalledWith(
+        {},
+        { $set: { text: 'New voice.', version: expect.stringMatching(/^[0-9a-f]{12}$/), updated_by: 'user-1' } },
+        { upsert: true, new: true },
+      );
+      expect(result).toEqual({ text: 'New voice.', version: 'expected-hash' });
+    });
 
-    getBrandVoiceGuidelines();
-    getBrandVoiceGuidelines();
-    expect(readFileSync).toHaveBeenCalledTimes(1);
+    it('defaults updated_by to null when not given', async () => {
+      (BrandVoiceGuidelines.findOneAndUpdate as jest.Mock).mockResolvedValue({ text: 'x', version: 'y' });
 
-    resetBrandVoiceGuidelinesCache();
-    (readFileSync as jest.Mock).mockReturnValue('content');
-    getBrandVoiceGuidelines();
-    expect(readFileSync).toHaveBeenCalledTimes(2);
-  });
+      await updateBrandVoiceGuidelines('x');
 
-  it('changes version when the file content changes', () => {
-    (readFileSync as jest.Mock).mockReturnValue('version one');
-    const v1 = getBrandVoiceGuidelines().version;
-
-    resetBrandVoiceGuidelinesCache();
-    (readFileSync as jest.Mock).mockReturnValue('version two');
-    const v2 = getBrandVoiceGuidelines().version;
-
-    expect(v1).not.toBe(v2);
+      expect(BrandVoiceGuidelines.findOneAndUpdate).toHaveBeenCalledWith(
+        {},
+        expect.objectContaining({ $set: expect.objectContaining({ updated_by: null }) }),
+        { upsert: true, new: true },
+      );
+    });
   });
 });

@@ -29,12 +29,15 @@ export interface WorkflowStepResponse extends WorkflowStepInput {
 export interface CreateWorkflowTemplateRequest {
   name: string;
   requires_warmup?: boolean;
+  /** Free-text category (e.g. "cold_outreach") used to roll up send-time performance across templates. */
+  workflow_type?: string;
   steps: WorkflowStepInput[];
 }
 
 export interface UpdateWorkflowTemplateRequest {
   name?: string;
   requires_warmup?: boolean;
+  workflow_type?: string;
   steps?: WorkflowStepInput[];
 }
 
@@ -43,6 +46,7 @@ export interface WorkflowTemplateResponse {
   org_id: string;
   name: string;
   requires_warmup: boolean;
+  workflow_type: string | null;
   steps: WorkflowStepResponse[];
   createdAt: string;
   updatedAt: string;
@@ -52,10 +56,17 @@ export interface EnrollSavedListRequest {
   saved_list_id: string;
 }
 
+export interface EnrollmentRejectionResponse {
+  lead_id: string;
+  reason: string;
+}
+
 export interface EnrollSavedListResponse {
   enrolled_count: number;
   skipped_count: number;
   enrollment_ids: string[];
+  rejected_count: number;
+  rejections: EnrollmentRejectionResponse[];
 }
 
 export interface ErrorResponse {

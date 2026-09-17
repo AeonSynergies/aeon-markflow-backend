@@ -21,6 +21,9 @@ export const EMAIL_TEMPLATE_VERSION_TRANSITIONS: Record<EmailTemplateVersionStat
   RESUBMITTED: ['PENDING_APPROVAL'],
 };
 
+// always/never render unconditionally at send time; auto defers to imagePolicy.service.ts's
+// resolveImageRenderDecision, which weighs the workflow step's position (a first-touch cold
+// email always strips, regardless of provider) and the recipient's provider category (Phase 8).
 export const IMAGE_POLICIES = ['always', 'never', 'auto'] as const;
 export type ImagePolicy = (typeof IMAGE_POLICIES)[number];
 
@@ -31,4 +34,8 @@ export type GenerationSource = (typeof GENERATION_SOURCES)[number];
 // never auto-applies — only these roles may approve or reject an EmailTemplateVersion. Also
 // reused by SendGuardrail for resuming a paused domain (src/services/sendGuardrail.service.ts) —
 // an equally consequential "a human signed off on this" action.
-export const TEMPLATE_APPROVER_ROLES: Role[] = ['SUPER_ADMIN', 'ADMIN', 'BD_MANAGER', 'BD_SALES'];
+// Updated for the BD-Marketing role: BD-Marketing owns template content end to end (including
+// review), so it replaces BD-Sales here; BD-Admin was added alongside it. BD-Sales keeps its
+// broader WORKFLOW_ACCESS_ROLES membership (building/running workflows) — it just no longer
+// approves/rejects template content specifically.
+export const TEMPLATE_APPROVER_ROLES: Role[] = ['SUPER_ADMIN', 'ADMIN', 'BD_ADMIN', 'BD_MANAGER', 'BD_MARKETING'];

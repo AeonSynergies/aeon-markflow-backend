@@ -1,6 +1,6 @@
 import { Schema, model, type InferSchemaType, type Types } from 'mongoose';
 import { REVIEW_TASK_KINDS, REVIEW_TASK_STATUSES } from '../constants/reviewTask';
-import { requiredWhenKindIs } from '../utils/mongooseValidators';
+import { requiredWhenKindIs, requiredWhenKindIsOneOf } from '../utils/mongooseValidators';
 
 const reviewTaskSchema = new Schema(
   {
@@ -11,13 +11,49 @@ const reviewTaskSchema = new Schema(
     email_template_version_id: {
       type: Schema.Types.ObjectId,
       ref: 'EmailTemplateVersion',
-      required: requiredWhenKindIs('email_template_version', 'email_template_version_id is required when kind is email_template_version'),
+      required: requiredWhenKindIsOneOf(
+        ['email_template_version', 'email_version_deliverability'],
+        'email_template_version_id is required when kind is email_template_version or email_version_deliverability',
+      ),
     },
     // Set by SendGuardrail when it pauses a domain (Phase 5) — see sendGuardrail.service.ts.
     domain: {
       type: String,
       trim: true,
       required: requiredWhenKindIs('domain_guardrail', 'domain is required when kind is domain_guardrail'),
+    },
+    // SendGuardrail pauses a (domain, mailbox) pair, not the whole domain — a human reviewing
+    // this task needs to know which mailbox tripped it, since another mailbox on the same domain
+    // may still be sending normally.
+    mailbox: {
+      type: String,
+      trim: true,
+      required: requiredWhenKindIs('domain_guardrail', 'mailbox is required when kind is domain_guardrail'),
+    },
+    // Set by send-time optimization's ai_suggested path (Phase 7) — see sendTimeOptimization.service.ts.
+    send_time_recommendation_id: {
+      type: Schema.Types.ObjectId,
+      ref: 'SendTimeRecommendation',
+      required: requiredWhenKindIs(
+        'send_time_recommendation',
+        'send_time_recommendation_id is required when kind is send_time_recommendation',
+      ),
+    },
+    // Set when kind is lead_unsubscribe_request — see mailboxPoller.service.ts.
+    lead_id: {
+      type: Schema.Types.ObjectId,
+      ref: 'Lead',
+      required: requiredWhenKindIs('lead_unsubscribe_request', 'lead_id is required when kind is lead_unsubscribe_request'),
+    },
+    // The specific inbound reply whose AI classification triggered this — lets a reviewer read
+    // the actual message, not just the fact that something was classified as an unsubscribe.
+    lead_activity_id: {
+      type: Schema.Types.ObjectId,
+      ref: 'LeadActivity',
+      required: requiredWhenKindIs(
+        'lead_unsubscribe_request',
+        'lead_activity_id is required when kind is lead_unsubscribe_request',
+      ),
     },
     status: { type: String, enum: REVIEW_TASK_STATUSES, default: 'OPEN', required: true },
     requested_by: { type: Schema.Types.ObjectId, ref: 'User', default: null },
@@ -32,7 +68,8 @@ const reviewTaskSchema = new Schema(
 );
 
 reviewTaskSchema.index({ org_id: 1, status: 1 });
-reviewTaskSchema.index({ domain: 1, status: 1 });
+reviewTaskSchema.index({ domain: 1, mailbox: 1, status: 1 });
+reviewTaskSchema.index({ lead_id: 1, status: 1 });
 
 export type ReviewTaskDocument = InferSchemaType<typeof reviewTaskSchema> & { _id: Types.ObjectId };
 

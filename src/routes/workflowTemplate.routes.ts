@@ -88,6 +88,8 @@ export async function enrollSavedListHandler(req: Request, res: Response, next: 
       enrolled_count: result.enrolledCount,
       skipped_count: result.skippedCount,
       enrollment_ids: result.enrollmentIds,
+      rejected_count: result.rejections.length,
+      rejections: result.rejections.map((rejection) => ({ lead_id: rejection.leadId, reason: rejection.reason })),
     });
   } catch (error) {
     next(error);

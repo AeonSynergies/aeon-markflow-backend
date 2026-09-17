@@ -90,6 +90,10 @@
             "type": "boolean",
             "default": false
           },
+          "workflow_type": {
+            "type": "string",
+            "description": "Free-text category (e.g. \"cold_outreach\") used to roll up send-time performance across templates."
+          },
           "steps": {
             "type": "array",
             "items": {
@@ -106,6 +110,9 @@
           },
           "requires_warmup": {
             "type": "boolean"
+          },
+          "workflow_type": {
+            "type": "string"
           },
           "steps": {
             "type": "array",
@@ -129,6 +136,10 @@
           },
           "requires_warmup": {
             "type": "boolean"
+          },
+          "workflow_type": {
+            "type": "string",
+            "nullable": true
           },
           "steps": {
             "type": "array",
@@ -171,6 +182,23 @@
             "items": {
               "type": "string"
             }
+          },
+          "rejected_count": {
+            "type": "integer"
+          },
+          "rejections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "lead_id": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },
@@ -200,6 +228,9 @@
           "workflow_position": {
             "type": "string"
           },
+          "intended_workflow_type": {
+            "type": "string"
+          },
           "current_version_id": {
             "type": "string",
             "nullable": true
@@ -211,6 +242,183 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "EmailTemplateUsageResponse": {
+        "type": "object",
+        "properties": {
+          "workflow_template_id": {
+            "type": "string"
+          },
+          "workflow_template_name": {
+            "type": "string"
+          },
+          "workflow_type": {
+            "type": "string",
+            "nullable": true
+          },
+          "step_index": {
+            "type": "integer"
+          },
+          "email_template_version_id": {
+            "type": "string"
+          },
+          "version_number": {
+            "type": "integer"
+          }
+        }
+      },
+      "LeadResponse": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "contact_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "company": {
+            "type": "string",
+            "nullable": true
+          },
+          "email": {
+            "type": "string",
+            "nullable": true
+          },
+          "phone": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "NEW-COLD",
+              "NEW-INBOUND",
+              "CONTACTED",
+              "CONTACTED-PHONE",
+              "CONTACTED-EMAIL",
+              "PROSPECT",
+              "INACTIVE",
+              "RECLAIMED"
+            ]
+          },
+          "email_deliverability": {
+            "type": "string",
+            "enum": [
+              "GOOD",
+              "LOW",
+              "BAD"
+            ]
+          },
+          "phone_dnd_status": {
+            "type": "boolean"
+          },
+          "lost_reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "lost_stage": {
+            "type": "string",
+            "nullable": true
+          },
+          "recycled_from_deal_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "eligible_for_reengagement_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreateSavedListRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "lead_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AddLeadsToSavedListRequest": {
+        "type": "object",
+        "required": [
+          "lead_ids"
+        ],
+        "properties": {
+          "lead_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SavedListResponse": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "lead_count": {
+            "type": "integer"
+          },
+          "created_by": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SavedListBulkActionResponse": {
+        "type": "object",
+        "properties": {
+          "saved_list": {
+            "$ref": "#/components/schemas/SavedListResponse"
+          },
+          "added_count": {
+            "type": "integer"
+          },
+          "skipped_count": {
+            "type": "integer"
           }
         }
       },
@@ -265,6 +473,555 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "RejectEmailTemplateVersionRequest": {
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "ResubmitEmailTemplateVersionRequest": {
+        "type": "object",
+        "properties": {
+          "subject_line": {
+            "type": "string"
+          },
+          "body_html": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateAiDraftEmailTemplateVersionRequest": {
+        "type": "object",
+        "required": [
+          "brief"
+        ],
+        "properties": {
+          "persona": {
+            "type": "string"
+          },
+          "workflow_position": {
+            "type": "string"
+          },
+          "brief": {
+            "type": "string"
+          }
+        }
+      },
+      "ReviewTaskResponse": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string"
+          },
+          "org_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "email_template_version",
+              "domain_guardrail",
+              "email_version_deliverability",
+              "send_time_recommendation",
+              "lead_unsubscribe_request"
+            ]
+          },
+          "email_template_version_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "domain": {
+            "type": "string",
+            "nullable": true
+          },
+          "mailbox": {
+            "type": "string",
+            "nullable": true
+          },
+          "send_time_recommendation_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "lead_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "lead_activity_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "APPROVED",
+              "REJECTED"
+            ]
+          },
+          "requested_by": {
+            "type": "string",
+            "nullable": true
+          },
+          "reviewed_by": {
+            "type": "string",
+            "nullable": true
+          },
+          "reviewed_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "rejection_reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CrossOrgInsightResponse": {
+        "type": "object",
+        "properties": {
+          "insight_type": {
+            "type": "string",
+            "enum": [
+              "sequence_shape",
+              "step_count",
+              "send_time_window"
+            ]
+          },
+          "workflow_type": {
+            "type": "string",
+            "nullable": true
+          },
+          "persona": {
+            "type": "string",
+            "nullable": true
+          },
+          "step_kinds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "step_count": {
+            "type": "integer"
+          },
+          "day_of_week": {
+            "type": "integer"
+          },
+          "hour_bucket": {
+            "type": "integer"
+          },
+          "timezone_bucket": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "emerging",
+              "established"
+            ]
+          }
+        }
+      },
+      "RawCrossOrgInsightResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CrossOrgInsightResponse"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "org_count": {
+                "type": "integer"
+              },
+              "sample_size": {
+                "type": "integer"
+              },
+              "avg_reply_rate": {
+                "type": "number"
+              },
+              "avg_meeting_rate": {
+                "type": "number"
+              },
+              "computed_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        ]
+      },
+      "SenderMailboxInput": {
+        "type": "object",
+        "required": [
+          "address"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "inactive"
+            ]
+          }
+        }
+      },
+      "SendingDomainInput": {
+        "type": "object",
+        "required": [
+          "domain",
+          "purpose"
+        ],
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "marketing",
+              "transactional",
+              "alerts"
+            ]
+          },
+          "mailboxes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SenderMailboxInput"
+            }
+          }
+        }
+      },
+      "UpdateOrganizationSettingsRequest": {
+        "type": "object",
+        "properties": {
+          "enabled_features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sending_domains": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SendingDomainInput"
+            }
+          },
+          "send_time_strategy": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "ai_suggested",
+              "ai_automatic"
+            ]
+          }
+        }
+      },
+      "SendingDomainResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SendingDomainInput"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mailboxes": {
+                "type": "array",
+                "items": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SenderMailboxInput"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "active",
+                            "inactive"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "OrganizationSettingsResponse": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled_features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "product_context": {
+            "type": "string"
+          },
+          "brand_voice_guidelines_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "sending_domains": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SendingDomainResponse"
+            }
+          },
+          "send_time_strategy": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "ai_suggested",
+              "ai_automatic"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreateUserAccessGrantRequest": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "app",
+          "role"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "string"
+          },
+          "app": {
+            "type": "string",
+            "enum": [
+              "markflow",
+              "onboard"
+            ]
+          },
+          "org_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Omit to default to the URL org id; null means all orgs."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "SUPER_ADMIN",
+              "ADMIN",
+              "BD_ADMIN",
+              "BD_MANAGER",
+              "BD_LEAD_GEN",
+              "BD_SALES",
+              "BD_MARKETING"
+            ]
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "UpdateUserAccessGrantRequest": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "SUPER_ADMIN",
+              "ADMIN",
+              "BD_ADMIN",
+              "BD_MANAGER",
+              "BD_LEAD_GEN",
+              "BD_SALES",
+              "BD_MARKETING"
+            ]
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "UserAccessGrantResponse": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "user_email": {
+            "type": "string",
+            "nullable": true
+          },
+          "app": {
+            "type": "string",
+            "enum": [
+              "markflow",
+              "onboard"
+            ]
+          },
+          "org_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "SUPER_ADMIN",
+              "ADMIN",
+              "BD_ADMIN",
+              "BD_MANAGER",
+              "BD_LEAD_GEN",
+              "BD_SALES",
+              "BD_MARKETING"
+            ]
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "UpsertGuardrailSettingsRequest": {
+        "type": "object",
+        "properties": {
+          "ramp_up_starting_daily_cap": {
+            "type": "number"
+          },
+          "ramp_up_step_multiplier": {
+            "type": "number"
+          },
+          "ramp_up_step_interval_days": {
+            "type": "number"
+          },
+          "ramp_up_steady_state_daily_cap": {
+            "type": "number"
+          },
+          "guardrail_short_window_hours": {
+            "type": "number"
+          },
+          "guardrail_long_window_days": {
+            "type": "number"
+          },
+          "guardrail_min_sample_size": {
+            "type": "number"
+          },
+          "throttle_bounce_rate": {
+            "type": "number"
+          },
+          "throttle_complaint_rate": {
+            "type": "number"
+          },
+          "hard_stop_bounce_rate": {
+            "type": "number"
+          },
+          "hard_stop_complaint_rate": {
+            "type": "number"
+          }
+        }
+      },
+      "GuardrailSettingsResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/UpsertGuardrailSettingsRequest"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "org_id": {
+                "type": "string"
+              },
+              "domain": {
+                "type": "string"
+              },
+              "has_override": {
+                "type": "boolean"
+              },
+              "overridden_fields": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "UpdateBrandVoiceGuidelinesRequest": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "BrandVoiceGuidelinesResponse": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
           }
         }
       }
@@ -487,11 +1244,12 @@
         }
       }
     },
-    "/orgs/{orgId}/email-templates": {
+    "/orgs/{orgId}/user-access-grants": {
       "get": {
-        "summary": "List email templates for an org",
+        "summary": "List UserAccessGrants relevant to an org (scoped to it, plus any all-orgs grant)",
+        "description": "Admin/Super Admin only — only Admin/Super Admin can view or manage access grants, per the RBAC table.",
         "tags": [
-          "EmailTemplates"
+          "Settings"
         ],
         "parameters": [
           {
@@ -511,11 +1269,714 @@
                 "schema": {
                   "type": "array",
                   "items": {
+                    "$ref": "#/components/schemas/UserAccessGrantResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a UserAccessGrant",
+        "description": "Admin/Super Admin only. org_id defaults to the URL's orgId when omitted; passing org_id explicitly as null (all orgs) or as a different org requires the caller to already hold access to that wider or different scope themselves — a grant can never exceed the caller's own access.\n",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserAccessGrantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserAccessGrantResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The requested org_id scope exceeds the caller's own access"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/user-access-grants/{grantId}": {
+      "patch": {
+        "summary": "Update a UserAccessGrant's role and/or features",
+        "description": "Admin/Super Admin only. app, org_id, and user_id are immutable after creation — the model's own unique index is on that exact triple, so changing any of them is really a different grant.\n",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "grantId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserAccessGrantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserAccessGrantResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/saved-lists": {
+      "post": {
+        "summary": "Create a SavedList, optionally seeded with a bulk lead selection",
+        "description": "The Leads screen's \"enroll selected leads into a SavedList\" bulk action, new-list path. Workflow-related, per the RBAC table — same access as building/running a workflow, not the plain Lead view/upload/monitor access BD-Lead Gen has. Any lead_ids not belonging to this org's own Lead records are dropped rather than trusted, reported via skipped_count.\n",
+        "tags": [
+          "SavedLists"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSavedListRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedListBulkActionResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List SavedLists for an org",
+        "tags": [
+          "SavedLists"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SavedListResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/saved-lists/{savedListId}/leads": {
+      "post": {
+        "summary": "Add a bulk lead selection to an existing SavedList",
+        "description": "The Leads screen's \"enroll selected leads into a SavedList\" bulk action, add-to-existing path. Deduped against the list's current membership and against lead ids that don't belong to this org's own Lead records.\n",
+        "tags": [
+          "SavedLists"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "savedListId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddLeadsToSavedListRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedListBulkActionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/review-tasks": {
+      "get": {
+        "summary": "List an org's ReviewTasks",
+        "description": "Defaults to status=OPEN — the actionable queue. ReviewTask is generic across five kinds (email_template_version, domain_guardrail, email_version_deliverability, send_time_recommendation, lead_unsubscribe_request); pass kind to narrow to one. This is what lets a Template Review queue UI list open email_template_version tasks directly, instead of inferring \"pending\" purely from EmailTemplate/EmailTemplateVersion status.\n",
+        "tags": [
+          "EmailTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "OPEN",
+                "APPROVED",
+                "REJECTED"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "email_template_version",
+                "domain_guardrail",
+                "email_version_deliverability",
+                "send_time_recommendation",
+                "lead_unsubscribe_request"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ReviewTaskResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/organization": {
+      "get": {
+        "summary": "Get an org's configuration (Settings screen)",
+        "description": "Admin/Super Admin only, per the RBAC table's treatment of org-level configuration.",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationSettingsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update an org's enabled_features, sending_domains, and/or send_time_strategy",
+        "description": "Admin/Super Admin only. sending_domains, if given, fully replaces the array — same full-replace semantics as a WorkflowTemplate's own `steps` field, not a merge. Does not touch name, product_context, or brand_voice_guidelines_id.\n",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOrganizationSettingsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationSettingsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error (e.g. an unknown sending_domains purpose)"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/leads": {
+      "get": {
+        "summary": "List/filter/search Leads for an org",
+        "description": "Open to every role with org access, including BD-Lead Gen (view/upload/monitor only, per the RBAC table) — no workflow-related action happens here. `segment=recycled` narrows to the Recycled/Win-back segment (status RECLAIMED, with lost_reason/lost_stage populated) and is itself gated to BD-Sales/BD-Manager/Admin/Super Admin; any other role requesting it gets 403 rather than a silently-filtered result. `search` matches the lead's Contact name/company — since a Contact can be a Lead in more than one org, this always resolves back to *this org's own* Lead record, never another org's.\n",
+        "tags": [
+          "Leads"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "NEW-COLD",
+                "NEW-INBOUND",
+                "CONTACTED",
+                "CONTACTED-PHONE",
+                "CONTACTED-EMAIL",
+                "PROSPECT",
+                "INACTIVE",
+                "RECLAIMED"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "segment",
+            "required": false,
+            "description": "Pass \"recycled\" for the Recycled/Win-back segment (status RECLAIMED).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "recycled"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "description": "Case-insensitive substring match against the lead's Contact name/company.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LeadResponse"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "segment=recycled requested by a role outside RECYCLED_SEGMENT_ROLES"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/guardrail-settings": {
+      "get": {
+        "summary": "List SendGuardrail settings for every one of an org's configured sending domains",
+        "description": "Admin/Super Admin only. One row per Organization.sending_domains[] entry, each showing the currently *effective* values (a per-domain override merged over the hardcoded defaults in src/constants/sendGuardrail.ts) plus which fields, if any, are overridden.\n",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GuardrailSettingsResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/guardrail-settings/{domain}": {
+      "get": {
+        "summary": "Get the effective SendGuardrail settings for one (org, domain) pair",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "domain",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK — always 200, even with no override (returns the hardcoded defaults)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailSettingsResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Upsert a per-(org, domain) override of SendGuardrail's ramp-up numbers/thresholds",
+        "description": "Admin/Super Admin only. Only the fields present in the body are written — a field left out keeps its previously-stored value (or stays unset/default), the same partial-PATCH semantics as everywhere else in this codebase. Takes effect on the very next canSend() check; nothing needs a restart or redeploy.\n",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "domain",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertGuardrailSettingsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailSettingsResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove the override — every field for this (org, domain) reverts to the hardcoded default",
+        "description": "Admin/Super Admin only. Idempotent — deleting a pair with no override is a no-op.",
+        "tags": [
+          "Settings"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "domain",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/email-templates": {
+      "get": {
+        "summary": "List email templates for an org, optionally filtered by context",
+        "description": "Unfiltered, returns every template in the org (not just those pending approval) — a browsable listing for a UI to show. Filtered by persona/workflow_position/ intended_workflow_type and status=APPROVED, this is also the workflow builder's own template-picker query: it narrows candidates for a step's inspector directly to templates with an approved, pinnable version (current_version_id), instead of listing every approved template in the org.\n",
+        "tags": [
+          "EmailTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "persona",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workflow_position",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "intended_workflow_type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "description": "Only templates with at least one version at this status.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "DRAFT",
+                "PENDING_APPROVAL",
+                "APPROVED",
+                "REJECTED",
+                "RESUBMITTED"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
                     "$ref": "#/components/schemas/EmailTemplateResponse"
                   }
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/email-templates/{templateId}/usages": {
+      "get": {
+        "summary": "List every WorkflowTemplate step currently pinned to a version of this template",
+        "description": "Computed live from WorkflowTemplate.steps on every call — no separate stored index. Never includes Enrollment.steps, which are frozen per-enrollment snapshots that can't be broken by editing or removing this template. Meant to warn a human what would break before they make a destructive change to a template still in use.\n",
+        "tags": [
+          "EmailTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EmailTemplateUsageResponse"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
           }
         }
       }
@@ -576,6 +2037,347 @@
           },
           "404": {
             "description": "Not found"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/email-templates/{templateId}/versions/{versionId}/approve": {
+      "post": {
+        "summary": "Approve a PENDING_APPROVAL email template version",
+        "description": "Transitions the version to APPROVED, sets it as the parent EmailTemplate's current_version_id, and closes (status: APPROVED) the ReviewTask opened when it was submitted for review. Gated to TEMPLATE_APPROVER_ROLES (SUPER_ADMIN, ADMIN, BD_ADMIN, BD_MANAGER, BD_MARKETING) — the same role set `resumeDomain` on SendGuardrail reuses for its own \"human signed off\" gate.\n",
+        "tags": [
+          "EmailTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "versionId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailTemplateVersionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Version is not in a state that can transition to APPROVED"
+          },
+          "403": {
+            "description": "Caller's role is not authorized to approve"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/email-templates/{templateId}/versions/{versionId}/reject": {
+      "post": {
+        "summary": "Reject a PENDING_APPROVAL email template version",
+        "description": "Transitions the version to REJECTED and closes (status: REJECTED) the associated ReviewTask, recording the given reason on it. Gated to TEMPLATE_APPROVER_ROLES, same as approve.\n",
+        "tags": [
+          "EmailTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "versionId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectEmailTemplateVersionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailTemplateVersionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing reason, or version is not in a state that can transition to REJECTED"
+          },
+          "403": {
+            "description": "Caller's role is not authorized to reject"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/email-templates/{templateId}/versions/{versionId}/resubmit": {
+      "post": {
+        "summary": "Resubmit a REJECTED email template version for another review pass",
+        "description": "Applies optional edits, moves the version REJECTED -> RESUBMITTED, then immediately submits it for review again (RESUBMITTED -> PENDING_APPROVAL), opening a fresh ReviewTask — resubmitVersion alone would leave nothing actionable for a reviewer. Gated to WORKFLOW_ACCESS_ROLES (the same role set that can view/act on templates generally), not TEMPLATE_APPROVER_ROLES — resubmitting is the original author's action, not a reviewer's.\n",
+        "tags": [
+          "EmailTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "versionId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResubmitEmailTemplateVersionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailTemplateVersionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Version is not in a state that can be resubmitted"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/orgs/{orgId}/email-templates/{templateId}/versions/ai-draft": {
+      "post": {
+        "summary": "Generate a new AI draft version for this template on demand",
+        "description": "Wraps createAiDraftVersion (previously only reachable from the internal Phase 6 diagnosis job) behind an HTTP route. persona/workflow_position are optional context folded into the generation instructions — the EmailTemplate's own stored persona/ workflow_position already drive reference-example lookup regardless. brief is the actual content ask and is required. Always creates a DRAFT — never auto-submits it for review, per the human-in-the-loop rule. Gated to TEMPLATE_APPROVER_ROLES, not WORKFLOW_ACCESS_ROLES.\n",
+        "tags": [
+          "EmailTemplates"
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orgId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "templateId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAiDraftEmailTemplateVersionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailTemplateVersionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing brief"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/cross-org-insights": {
+      "get": {
+        "summary": "Generic cross-org recommendations for the workflow builder",
+        "description": "Abstracted structural/timing patterns (sequence shape, step counts, send-time windows) observed across at least several distinct orgs — never one org's raw content or org-specific metrics. Available to any workflow-access role. Only a coarse confidence label is included; see /cross-org-insights/raw for the underlying numbers.\n",
+        "tags": [
+          "CrossOrgInsights"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CrossOrgInsightResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/cross-org-insights/raw": {
+      "get": {
+        "summary": "Raw cross-org insight data (Admin/Super Admin only)",
+        "description": "The same patterns as /cross-org-insights, plus the exact org_count/sample_size/ avg_reply_rate/avg_meeting_rate pooled across every qualifying org.\n",
+        "tags": [
+          "CrossOrgInsights"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RawCrossOrgInsightResponse"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not authorized (Admin/Super Admin only)"
+          }
+        }
+      }
+    },
+    "/brand-voice": {
+      "get": {
+        "summary": "Get the current Brand Voice guidelines",
+        "description": "Admin/Super Admin only. Not org-scoped — there is exactly one current guidelines document, shared by every org's AI email generation (see brandVoice.service.ts for why Organization.brand_voice_guidelines_id doesn't factor in here). No :orgId in the path, deliberately: nesting it under one org's Settings screen would incorrectly imply the edit is scoped to that org, when it actually affects every org's generated drafts.\n",
+        "tags": [
+          "Settings"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandVoiceGuidelinesResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace the current Brand Voice guidelines",
+        "description": "Admin/Super Admin only. Affects every org's next AI-generated draft immediately.",
+        "tags": [
+          "Settings"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBrandVoiceGuidelinesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandVoiceGuidelinesResponse"
+                }
+              }
+            }
           }
         }
       }

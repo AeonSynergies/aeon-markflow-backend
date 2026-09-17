@@ -4,10 +4,17 @@ jest.mock('../../src/models/TrackedLink.model', () => ({
 jest.mock('../../src/models/LinkClick.model', () => ({
   LinkClick: { create: jest.fn() },
 }));
+jest.mock('../../src/services/emailEngagement.service', () => ({ recordClickForEngagement: jest.fn() }));
 
 import { LinkClick } from '../../src/models/LinkClick.model';
 import { TrackedLink } from '../../src/models/TrackedLink.model';
-import { createTrackedLink, recordClick, rewriteLinksForTracking } from '../../src/services/linkTracking.service';
+import { recordClickForEngagement } from '../../src/services/emailEngagement.service';
+import {
+  createTrackedLink,
+  insertOpenTrackingPixel,
+  recordClick,
+  rewriteLinksForTracking,
+} from '../../src/services/linkTracking.service';
 
 describe('linkTracking.service', () => {
   afterEach(() => jest.clearAllMocks());
@@ -62,13 +69,35 @@ describe('linkTracking.service', () => {
     it('logs a click against the tracked link', async () => {
       (LinkClick.create as jest.Mock).mockResolvedValueOnce({});
 
-      await recordClick('link-1', { ip: '1.2.3.4', userAgent: 'jest' });
+      await recordClick({ _id: 'link-1' }, { ip: '1.2.3.4', userAgent: 'jest' });
 
       expect(LinkClick.create).toHaveBeenCalledWith({
         tracked_link_id: 'link-1',
         ip: '1.2.3.4',
         user_agent: 'jest',
       });
+      expect(recordClickForEngagement).not.toHaveBeenCalled();
+    });
+
+    it('also updates the matching EmailEngagement record when the link has a lead/version', async () => {
+      (LinkClick.create as jest.Mock).mockResolvedValueOnce({});
+
+      await recordClick(
+        { _id: 'link-1', lead_id: 'lead-1', email_template_version_id: 'ver-1' },
+        { ip: '1.2.3.4', userAgent: 'jest' },
+      );
+
+      expect(recordClickForEngagement).toHaveBeenCalledWith('lead-1', 'ver-1');
+    });
+  });
+
+  describe('insertOpenTrackingPixel', () => {
+    it('appends a 1x1 tracking pixel pointing at the given url', () => {
+      const result = insertOpenTrackingPixel('<p>Hi</p>', 'https://track.dev/o/tok-1');
+      expect(result).toContain('<p>Hi</p>');
+      expect(result).toContain('src="https://track.dev/o/tok-1"');
+      expect(result).toContain('width="1"');
+      expect(result).toContain('height="1"');
     });
   });
 });

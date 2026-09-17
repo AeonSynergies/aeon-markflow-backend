@@ -16,6 +16,11 @@ const contactSchema = new Schema(
   {
     // Contacts are shared across orgs (a single person may be a lead for more than one
     // organization) — org-specific state lives on Lead, not here.
+    // Identity fields (name/company) live here rather than on Lead for the same reason: a
+    // person's name and current employer don't change per org they happen to be a lead for.
+    // Neither existed before the Leads-screen search feature needed something to search by.
+    name: { type: String, trim: true },
+    company: { type: String, trim: true },
     email: {
       type: String,
       trim: true,
@@ -25,6 +30,11 @@ const contactSchema = new Schema(
       sparse: true,
     },
     phone: { type: String, trim: true },
+    // IANA time zone name (e.g. "America/New_York"), when known — send-time optimization
+    // (Phase 7) resolves sends to this contact's own local time rather than the server's.
+    // Nothing currently populates this automatically; nullable, and every consumer must fall
+    // back to UTC when it's missing (see src/utils/timezone.ts).
+    timezone: { type: String, trim: true, default: null },
     firmographics: { type: firmographicsSchema, default: undefined },
     // Hard suppress override — takes precedence over any org-level or lead-level
     // deliverability/DND state.

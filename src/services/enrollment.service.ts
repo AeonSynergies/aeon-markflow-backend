@@ -1,6 +1,12 @@
+import { Contact } from '../models/Contact.model';
 import { Enrollment } from '../models/Enrollment.model';
+import { Lead } from '../models/Lead.model';
+import { Organization } from '../models/Organization.model';
 import { SavedList } from '../models/SavedList.model';
 import { enqueueStepJob } from '../queues/enrollmentQueue';
+import type { WorkflowStepInput } from '../types/api/workflow';
+import { resolveStepForEnrollment } from './abTesting.service';
+import { assignMailboxesForDomains } from './domainRouter.service';
 import { getWorkflowTemplate } from './workflowTemplate.service';
 
 export class SavedListNotFoundError extends Error {
@@ -24,10 +30,23 @@ export class CrossOrgReferenceError extends Error {
   }
 }
 
+export class OrganizationNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Organization ${id} not found`);
+    this.name = 'OrganizationNotFoundError';
+  }
+}
+
+export interface EnrollmentRejection {
+  leadId: string;
+  reason: string;
+}
+
 export interface EnrollSavedListResult {
   enrolledCount: number;
   skippedCount: number;
   enrollmentIds: string[];
+  rejections: EnrollmentRejection[];
 }
 
 function isDuplicateKeyError(error: unknown): boolean {
@@ -35,10 +54,33 @@ function isDuplicateKeyError(error: unknown): boolean {
 }
 
 /**
+ * True only when the lead's own Contact positively confirms global_do_not_contact — an explicit
+ * opt-out that overrides any other state, including "eligible for re-engagement" (there is no
+ * separate recycle/win-back enrollment path in this codebase; every enrollment, recycled leads
+ * included, goes through enrollSavedList, so this one check covers all of them). Fails open (does
+ * NOT report suppression) when the Lead or Contact can't be found, matching this function's
+ * pre-existing behavior of trusting `savedList.lead_ids` without validating each id resolves to a
+ * real Lead — not something this change is trying to fix.
+ */
+async function isContactSuppressed(leadId: string): Promise<boolean> {
+  const lead = await Lead.findById(leadId).lean();
+  if (!lead) return false;
+
+  const contact = await Contact.findById(lead.contact_id).lean();
+  return contact?.global_do_not_contact ?? false;
+}
+
+/**
  * Enrolls every lead in a SavedList into a WorkflowTemplate: one Enrollment per lead, each with
- * its own frozen snapshot of the template's current steps, and the first step's job enqueued
- * immediately. A lead already actively enrolled in this same template is skipped rather than
- * erroring the whole batch (enforced by Enrollment's partial unique index).
+ * its own frozen snapshot of the template's current steps, its own mailbox assignment per
+ * distinct sending domain among those steps (assignMailboxesForDomains — round-robinned once
+ * here, then reused for every send in the sequence rather than re-resolved per step), and the
+ * first step's job enqueued immediately. A lead already actively enrolled in this same template
+ * is skipped rather than erroring the whole batch (enforced by Enrollment's partial unique index).
+ * A lead whose Contact has opted out (global_do_not_contact) is rejected outright instead —
+ * reported back in `rejections`, not silently dropped, so whoever requested the enrollment knows
+ * why it didn't happen — rather than either being skipped indistinguishably from a duplicate or
+ * created anyway.
  */
 export async function enrollSavedList(templateId: string, savedListId: string): Promise<EnrollSavedListResult> {
   const template = await getWorkflowTemplate(templateId);
@@ -53,16 +95,47 @@ export async function enrollSavedList(templateId: string, savedListId: string): 
     );
   }
 
+  const org = await Organization.findById(template.org_id).lean();
+  if (!org) throw new OrganizationNotFoundError(template.org_id.toString());
+
   const enrollmentIds: string[] = [];
+  const rejections: EnrollmentRejection[] = [];
   let skippedCount = 0;
 
-  for (const leadId of savedList.lead_ids) {
+  for (const rawLeadId of savedList.lead_ids) {
+    const leadId = rawLeadId.toString();
     try {
+      if (await isContactSuppressed(leadId)) {
+        rejections.push({
+          leadId,
+          reason: 'Contact has opted out (global_do_not_contact) — overrides any eligible-for-re-engagement state',
+        });
+        continue;
+      }
+
+      // Resolved independently per lead: an A/B group's traffic split is a per-enrollment coin
+      // flip, not a batch-wide choice (see abTesting.service.ts's own doc comment). Converted to
+      // plain objects first — resolveStepForEnrollment takes the API-shaped WorkflowStepInput,
+      // not a live Mongoose subdocument.
+      const plainSteps = JSON.parse(JSON.stringify(template.steps)) as WorkflowStepInput[];
+      const steps = await Promise.all(plainSteps.map(resolveStepForEnrollment));
+
+      // Workflow enrollment sends are always MarkFlow's own marketing-purpose sends — see
+      // enrollmentProcessor.ts. One mailbox per distinct sending_domain among this lead's own
+      // (post-A/B) steps, resolved once here rather than per send.
+      const sendingDomains = steps
+        .filter((step): step is typeof step & { sending_domain: string } => step.kind === 'email' && !!step.sending_domain)
+        .map((step) => step.sending_domain);
+      const assignedMailboxes = await assignMailboxesForDomains(org, sendingDomains, 'marketing');
+
       const enrollment = await Enrollment.create({
         lead_id: leadId,
         workflow_template_id: template._id,
-        steps: template.steps,
+        steps,
         requires_warmup: template.requires_warmup ?? false,
+        workflow_type: template.workflow_type ?? null,
+        send_time_strategy: org.send_time_strategy ?? 'manual',
+        assigned_mailboxes: assignedMailboxes,
         current_step_index: 0,
         status: 'active',
       });
@@ -77,5 +150,38 @@ export async function enrollSavedList(templateId: string, savedListId: string): 
     }
   }
 
-  return { enrolledCount: enrollmentIds.length, skippedCount, enrollmentIds };
+  return { enrolledCount: enrollmentIds.length, skippedCount, enrollmentIds, rejections };
+}
+
+/**
+ * Moves one enrollment out of automation — the exit-condition counterpart to
+ * processEnrollmentStepJob's own 'completed' transition (enrollmentProcessor.ts), which only
+ * ever fires when a sequence runs out of steps. This fires instead when something outside the
+ * sequence itself says it should stop early: today, an AI-classified reply (see
+ * mailboxPoller.service.ts — 'interested' exits the correlated enrollment directly,
+ * 'unsubscribe_request' exits every active enrollment for the lead via
+ * exitAllActiveEnrollmentsForLead below). Idempotent — only an `active` enrollment is exited, so
+ * calling this twice (or after the enrollment already completed on its own) is a harmless no-op.
+ * `completed_at` doubles as "ended at" here — there is no separate field for it, and both a
+ * completed and an exited enrollment equally stopped being active at that timestamp.
+ */
+export async function exitEnrollment(enrollmentId: string, exitReason: string): Promise<void> {
+  const enrollment = await Enrollment.findById(enrollmentId);
+  if (!enrollment || enrollment.status !== 'active') return;
+
+  enrollment.status = 'exited';
+  enrollment.exit_reason = exitReason;
+  enrollment.completed_at = new Date();
+  await enrollment.save();
+}
+
+/**
+ * Exits every currently-active enrollment for a lead, regardless of which one a triggering event
+ * (e.g. an unsubscribe-request reply) happened to thread against — a compliance action needs to
+ * stop every automated sequence still running for that lead, not just the one this particular
+ * reply came in on.
+ */
+export async function exitAllActiveEnrollmentsForLead(leadId: string, exitReason: string): Promise<void> {
+  const activeEnrollments = await Enrollment.find({ lead_id: leadId, status: 'active' }, '_id').lean();
+  await Promise.all(activeEnrollments.map((enrollment) => exitEnrollment(enrollment._id.toString(), exitReason)));
 }

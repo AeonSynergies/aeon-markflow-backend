@@ -31,4 +31,20 @@ describe('Contact model', () => {
     const doc = new Contact({ phone: '+15550001234' });
     expect(doc.validateSync()).toBeUndefined();
   });
+
+  it('defaults timezone to null and accepts an IANA zone string', () => {
+    const withDefault = new Contact({ email: 'lead@example.com' });
+    expect(withDefault.timezone).toBeNull();
+
+    const withTimezone = new Contact({ email: 'lead@example.com', timezone: 'America/New_York' });
+    expect(withTimezone.validateSync()).toBeUndefined();
+    expect(withTimezone.timezone).toBe('America/New_York');
+  });
+
+  it('accepts a name and company for the Leads screen to search by', () => {
+    const doc = new Contact({ email: 'lead@example.com', name: '  Jane Doe  ', company: 'Acme DSP' });
+    expect(doc.validateSync()).toBeUndefined();
+    expect(doc.name).toBe('Jane Doe');
+    expect(doc.company).toBe('Acme DSP');
+  });
 });
