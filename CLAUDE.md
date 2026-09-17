@@ -157,6 +157,14 @@ This is a triage aid, not a content generator — it never drafts or sends anyth
 
 No pagination on `GET /orgs/{orgId}/leads` — matches every other list endpoint in this codebase (`workflow-templates`, `email-templates`), none of which paginate either. Worth revisiting before a large org's Leads screen ships, since Lead volume is likely to dwarf template counts.
 
+## `GET /me` — the frontend's own identity/access endpoint
+
+✅ **Built**, not originally part of any backend phase — added because the frontend's navigation shell (org switcher + role-gated nav links) has no way to work without it. The shared JWT carries only `sub`/`email` (see `auth.middleware.ts`); nothing anywhere told a client which orgs a user can access or what role they hold until they already knew an `orgId` to call an org-scoped endpoint with — a chicken-and-egg gap. `GET /me` (no `:orgId`, just `requireAuth` + `attachOrgScope`) returns the caller's own identity, `org_access` (`all_orgs`, `roles`), and the resolved `orgs: [{id, name}]` list to populate a switcher from.
+
+**`org_access.roles` is the same flat, not-per-org set `requireRole` itself already checks** (`orgAccess.service.ts`'s `getOrgAccessForUser` collapses every grant's role into one `Set` regardless of which org it's for) — not a "this role for this org" breakdown. A user holding `BD_SALES` in one org and `BD_LEAD_GEN` only in another would, today, pass `requireRole(WORKFLOW_ACCESS_ROLES)` on *either* org's workflow endpoints, because the check never looks at the target org at all. This is a real pre-existing architectural simplification in the backend's own RBAC middleware, not something introduced or fixed here — deliberately not attempted in this change, since fixing it would mean touching every already-shipped `requireRole` call site's semantics, unrequested and risky. `GET /me` mirrors it exactly rather than inventing a more correct per-org shape the backend doesn't actually enforce — so a frontend nav link hidden/shown from this endpoint always matches what the backend would actually allow, for better or worse.
+
+`org_access.roles`' OpenAPI schema hardcodes its own copy of the role enum (`src/config/openapi.ts`, independent of the `ROLES` constant — same pattern as `UserAccessGrant`'s enums). This was written before `BD_MARKETING` existed and briefly went stale relative to `main` once it did; fixed here, while merging this PR forward past that change, to include `BD_MARKETING` too. Same drift risk as `TEMPLATE_APPROVER_ROLES`'s own table row above — this hardcoded copy isn't the source of truth either, `ROLES` is.
+
 ## Settings screen backend
 
 ✅ **Built.** Four independent pieces, all gated to `ADMIN_ONLY_ROLES` (Super Admin/Admin only — see the new RBAC rule above): org configuration, `UserAccessGrant` management, SendGuardrail's ramp-up/threshold overrides, and Brand Voice guideline editing.

@@ -7,6 +7,7 @@ import { crossOrgInsightRouter } from './routes/crossOrgInsight.routes';
 import { emailTemplateRouter } from './routes/emailTemplate.routes';
 import { guardrailSettingsRouter } from './routes/guardrailSettings.routes';
 import { leadRouter } from './routes/lead.routes';
+import { meRouter } from './routes/me.routes';
 import { organizationSettingsRouter } from './routes/organizationSettings.routes';
 import { reviewTaskRouter } from './routes/reviewTask.routes';
 import { savedListRouter } from './routes/savedList.routes';
@@ -30,6 +31,7 @@ export function createApp(): Express {
   app.use('/docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
 
   app.use(trackingRouter);
+  app.use(meRouter);
   app.use(workflowTemplateRouter);
   app.use(emailTemplateRouter);
   app.use(reviewTaskRouter);
