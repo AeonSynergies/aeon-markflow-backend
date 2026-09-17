@@ -18,6 +18,10 @@ const leadSchema = new Schema(
     lost_reason: { type: String, trim: true },
     lost_stage: { type: String, trim: true },
     eligible_for_reengagement_at: { type: Date },
+    // Set when status becomes DISCOVERY_RETRY (leadRecycle.service.ts's recycleLead), cleared
+    // once it leaves that status — this, not updatedAt (which changes on any field edit), is
+    // what discoveryRetryQueue's daily sweep checks against DISCOVERY_RETRY_GRADUATION_DAYS.
+    discovery_retry_started_at: { type: Date, default: null },
   },
   { timestamps: true },
 );
