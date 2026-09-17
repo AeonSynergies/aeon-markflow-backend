@@ -123,7 +123,7 @@ describe('emailTemplateVersion.service', () => {
     it('approves a PENDING_APPROVAL version for an authorized role and pins current_version_id', async () => {
       const version = mockVersion({ status: 'PENDING_APPROVAL' });
 
-      await approveVersion('ver-1', 'user-2', 'BD_SALES');
+      await approveVersion('ver-1', 'user-2', 'BD_MARKETING');
 
       expect(version.status).toBe('APPROVED');
       expect(ReviewTask.findOneAndUpdate).toHaveBeenCalledWith(
@@ -165,7 +165,7 @@ describe('emailTemplateVersion.service', () => {
 
     it('rejects an unauthorized role', async () => {
       mockVersion({ status: 'PENDING_APPROVAL' });
-      await expect(rejectVersion('ver-1', 'user-2', 'BD_ADMIN', 'no')).rejects.toThrow(
+      await expect(rejectVersion('ver-1', 'user-2', 'BD_SALES', 'no')).rejects.toThrow(
         UnauthorizedApproverRoleError,
       );
     });

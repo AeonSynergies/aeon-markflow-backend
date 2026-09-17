@@ -16,6 +16,7 @@ jest.mock('../../src/services/emailTemplateVersion.service', () => ({
   rejectVersion: jest.fn(),
   resubmitVersion: jest.fn(),
   submitForReview: jest.fn(),
+  createAiDraftVersion: jest.fn(),
 }));
 
 import {
@@ -32,6 +33,7 @@ import {
   rejectVersion,
   resubmitVersion,
   submitForReview,
+  createAiDraftVersion,
 } from '../../src/services/emailTemplateVersion.service';
 import {
   listEmailTemplateUsagesHandler,
@@ -40,6 +42,7 @@ import {
   approveEmailTemplateVersionHandler,
   rejectEmailTemplateVersionHandler,
   resubmitEmailTemplateVersionHandler,
+  createAiDraftEmailTemplateVersionHandler,
 } from '../../src/routes/emailTemplate.routes';
 
 function mockRes() {
@@ -368,6 +371,101 @@ describe('emailTemplate.routes handlers', () => {
       expect(resubmitVersion).toHaveBeenCalledWith('ver-1', { subjectLine: 'New subject', bodyHtml: undefined });
       expect(submitForReview).toHaveBeenCalledWith('ver-1', 'user-1');
       expect(res.json).toHaveBeenCalledWith({ _id: 'ver-1', status: 'PENDING_APPROVAL' });
+    });
+  });
+
+  describe('createAiDraftEmailTemplateVersionHandler', () => {
+    function draftReq(overrides: Record<string, unknown> = {}) {
+      return {
+        params: { orgId: 'org-1', templateId: 'tpl-1' },
+        query: {},
+        body: { brief: 'Announce the new self-serve tier' },
+        user: { id: 'user-1' },
+        orgAccess: { roles: ['BD_MARKETING'] },
+        ...overrides,
+      } as unknown as Request;
+    }
+
+    it('404s (via next) when the template belongs to a different org', async () => {
+      (getEmailTemplate as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'tpl-1' },
+        org_id: { toString: () => 'org-2' },
+      });
+      const next = jest.fn();
+
+      await createAiDraftEmailTemplateVersionHandler(draftReq(), mockRes(), next);
+
+      expect(next).toHaveBeenCalledWith(expect.any(EmailTemplateNotFoundError));
+      expect(createAiDraftVersion).not.toHaveBeenCalled();
+    });
+
+    it('responds 400 without calling createAiDraftVersion when brief is missing', async () => {
+      (getEmailTemplate as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'tpl-1' },
+        org_id: { toString: () => 'org-1' },
+      });
+      const res = mockRes();
+
+      await createAiDraftEmailTemplateVersionHandler(draftReq({ body: {} }), res, jest.fn());
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(createAiDraftVersion).not.toHaveBeenCalled();
+    });
+
+    it('responds 400 when brief is only whitespace', async () => {
+      (getEmailTemplate as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'tpl-1' },
+        org_id: { toString: () => 'org-1' },
+      });
+      const res = mockRes();
+
+      await createAiDraftEmailTemplateVersionHandler(draftReq({ body: { brief: '   ' } }), res, jest.fn());
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(createAiDraftVersion).not.toHaveBeenCalled();
+    });
+
+    it('folds persona/workflow_position into the instructions and creates a new_template draft', async () => {
+      (getEmailTemplate as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'tpl-1' },
+        org_id: { toString: () => 'org-1' },
+      });
+      (createAiDraftVersion as jest.Mock).mockResolvedValue({ _id: 'ver-9', status: 'DRAFT' });
+      const res = mockRes();
+
+      await createAiDraftEmailTemplateVersionHandler(
+        draftReq({
+          body: {
+            persona: 'fedex_isp',
+            workflow_position: 'cold_open',
+            brief: 'Announce the new self-serve tier',
+          },
+        }),
+        res,
+        jest.fn(),
+      );
+
+      expect(createAiDraftVersion).toHaveBeenCalledWith('tpl-1', {
+        type: 'new_template',
+        instructions: 'Persona: fedex_isp. Workflow position: cold_open. Announce the new self-serve tier',
+      });
+      expect(res.status).toHaveBeenCalledWith(201);
+      expect(res.json).toHaveBeenCalledWith({ _id: 'ver-9', status: 'DRAFT' });
+    });
+
+    it('uses the brief alone as instructions when persona/workflow_position are omitted', async () => {
+      (getEmailTemplate as jest.Mock).mockResolvedValue({
+        _id: { toString: () => 'tpl-1' },
+        org_id: { toString: () => 'org-1' },
+      });
+      (createAiDraftVersion as jest.Mock).mockResolvedValue({ _id: 'ver-9', status: 'DRAFT' });
+
+      await createAiDraftEmailTemplateVersionHandler(draftReq(), mockRes(), jest.fn());
+
+      expect(createAiDraftVersion).toHaveBeenCalledWith('tpl-1', {
+        type: 'new_template',
+        instructions: 'Announce the new self-serve tier',
+      });
     });
   });
 });

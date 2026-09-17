@@ -7,6 +7,7 @@ export const ROLES = [
   'BD_MANAGER',
   'BD_LEAD_GEN',
   'BD_SALES',
+  'BD_MARKETING',
 ] as const;
 export type Role = (typeof ROLES)[number];
 
