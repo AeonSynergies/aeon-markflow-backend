@@ -1,0 +1,37 @@
+version: 1.0
+runtime: nodejs20
+build:
+  commands:
+    build:
+      - npm ci
+      - npm run build
+run:
+  runtime-version: 20
+  command: npm run start:worker
+  network:
+    port: 8080
+    env: PORT
+  env:
+    - name: NODE_ENV
+      value: production
+# App Runner config for the BullMQ worker process (`npm run start:worker`, src/worker.ts —
+# mailbox polling, enrollment processing, the DISCOVERY_RETRY graduation sweep, etc.).
+#
+# The worker itself does no HTTP work — it's a background job processor, not a request handler —
+# but App Runner's model requires every service to be request-driven and health-checked. Rather
+# than moving this process to a different platform (e.g. ECS/Fargate) just to satisfy that,
+# src/healthCheckServer.ts starts a minimal HTTP server (single `GET /health` route, `{"status":
+# "ok"}`) alongside the real worker/scheduler logic — it exists solely to give App Runner's
+# health check something to respond to. The actual work stays exactly where it was: BullMQ
+# workers and repeatable job schedulers, all unchanged.
+#
+# Deploy this as a **second, separate App Runner service** from apprunner.yaml's API server —
+# same repo/build, different start command and different service, since they scale and restart
+# independently and neither should be routed customer/API traffic. When creating that service,
+# point its health check at `/health` (App Runner's health-check path/protocol/interval are
+# service-level configuration, not settable from this file — the default health check path is
+# "/", which this worker doesn't serve, so it must be changed to "/health" when the service is
+# created, or the service will never report healthy).
+#
+# No secrets in this file — same reasoning as apprunner.yaml: `MONGODB_URI`, the email-provider
+# credentials, etc. are configured on this App Runner service itself, not checked into the repo.

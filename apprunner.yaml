@@ -22,6 +22,6 @@ run:
 #
 # This config covers the HTTP API server (src/server.ts) only. The separate BullMQ worker process
 # (`npm run start:worker`, src/worker.ts — mailbox polling, enrollment processing, the
-# DISCOVERY_RETRY graduation sweep, etc.) is a background process with nothing to serve over HTTP,
-# so it doesn't fit App Runner's request-driven, health-checked model and needs its own deployment
-# target (e.g. ECS/Fargate) — not attempted here, flagged rather than silently left uncovered.
+# DISCOVERY_RETRY graduation sweep, etc.) has its own App Runner config now: apprunner-worker.yaml,
+# a second App Runner service pointed at this same repo/build with a different start command and
+# health-check path — see that file for why and how.
