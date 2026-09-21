@@ -1,4 +1,5 @@
 import { connectDatabase } from './config/database';
+import { startHealthCheckServer } from './healthCheckServer';
 import { scheduleCrossOrgInsightComputation } from './queues/crossOrgInsightQueue';
 import { startCrossOrgInsightWorker } from './queues/crossOrgInsightWorker';
 import { scheduleDiscoveryRetryGraduation } from './queues/discoveryRetryQueue';
@@ -13,6 +14,10 @@ import { startSendTimePerformanceWorker } from './queues/sendTimePerformanceWork
 
 async function main(): Promise<void> {
   await connectDatabase();
+
+  // App Runner is request-driven and health-checked — this process otherwise never listens on
+  // any port. See src/healthCheckServer.ts's own comment for why this exists.
+  startHealthCheckServer();
 
   const worker = startEnrollmentWorker();
   worker.on('failed', (job, error) => {
