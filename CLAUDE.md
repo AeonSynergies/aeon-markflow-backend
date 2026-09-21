@@ -161,7 +161,10 @@ The AI-draft-creation flow (`createAiDraftVersion`) currently has no HTTP route 
 
 ---
 
-## Known gap: recycle-receiving endpoint has no service-to-service auth yet
+## JWT shared-secret contract — corrected: MarkFlow's shape is the standard
+
+Onboard will be **rebuilt fresh**, not cloned from the old `cooterlabs/aeon-onboard-backend` codebase — so that codebase's existing JWT shape (`{ id, user_type: "Admin"|"Client", iat }`) is irrelevant and does not need to be matched. MarkFlow's already-implemented shape — `{ sub, email }`, verified in `auth.middleware.ts`'s `requireAuth` — is the real, working contract. **When Onboard's fresh build happens, its auth must be built to issue and verify `{ sub, email }` JWTs, signed with the same `JWT_SECRET` value MarkFlow uses** — not the reverse. `JWT_SECRET` itself is a freshly generated random value (not fetched from the old Vercel deployment), stored identically in both apps' secrets once Onboard exists.
+
 
 `POST /orgs/{orgId}/leads/{leadId}/recycle` (the Onboard → MarkFlow Lost+Recycle receiver, PR #41) is gated by `requireRole(WORKFLOW_ACCESS_ROLES)` — a normal human-user JWT with an org-scoped role. This works for testing/manual calls now, but **won't work when Onboard's backend actually calls this as a server-to-server webhook** once its build resumes — a server isn't a user with an org-scoped role. Needs a service-to-service auth mechanism (a dedicated internal API key/shared secret distinct from user JWTs, or a "system" identity) before Onboard's build can actually wire this up. Flagged now so it isn't rediscovered painfully later.
 
