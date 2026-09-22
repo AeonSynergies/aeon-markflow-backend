@@ -1,0 +1,54 @@
+name: Build and Push to ECR
+
+on:
+  push:
+    branches: [main]
+
+# id-token: write is what lets aws-actions/configure-aws-credentials assume an IAM role via
+# GitHub's OIDC provider, without a long-lived AWS access key stored as a repo secret.
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image (tagged with the commit SHA)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.ECR_REPOSITORY_URI }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+# Repo secrets this workflow needs (see CLAUDE.md's Stack section for the ops-side setup —
+# none of these can be provisioned from inside this repo):
+#   AWS_ROLE_ARN        — an IAM role this workflow assumes via OIDC, trusted for
+#                          token.actions.githubusercontent.com and scoped (via its trust
+#                          policy's `sub` condition) to this repo/branch; needs ecr:GetAuthorizationToken
+#                          plus ecr:BatchCheckLayerAvailability/PutImage/InitiateLayerUpload/
+#                          UploadLayerPart/CompleteLayerUpload/BatchGetImage on the target
+#                          ECR repository.
+#   AWS_REGION          — the AWS region the ECR repository lives in (e.g. us-east-1).
+#   ECR_REPOSITORY_URI  — the target ECR repository's full URI (e.g.
+#                          <account-id>.dkr.ecr.<region>.amazonaws.com/aeon-markflow-backend).
+#
+# This workflow only builds and pushes the image — it does not deploy it. Wiring the pushed
+# image into an ECS Express Mode service/task definition (or updating one on each push) is a
+# separate, not-yet-built step — flagged rather than silently left out; see CLAUDE.md.
